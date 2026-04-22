@@ -99,6 +99,8 @@ class QueueEntry(QueueEntryBase):
     id: UUID
     status: str
     added_at: datetime
+    reserved_at: datetime | None = None
+    reserved_by: str | None = None
     trace: Trace
 
     model_config = ConfigDict(from_attributes=True)
@@ -109,11 +111,17 @@ class FeedbackCreate(BaseModel):
     key: str
     score: float | None = None
     comment: str | None = None
+    span_path: list[str | int] | None = None
+    span_start_index: int | None = None
+    span_end_index: int | None = None
 
 
 class FeedbackUpdate(BaseModel):
     score: float | None = None
     comment: str | None = None
+    span_path: list[str | int] | None = None
+    span_start_index: int | None = None
+    span_end_index: int | None = None
 
 
 class Feedback(BaseModel):
@@ -122,6 +130,9 @@ class Feedback(BaseModel):
     key: str
     score: float | None = None
     comment: str | None = None
+    span_path: list[str | int] | None = None
+    span_start_index: int | None = None
+    span_end_index: int | None = None
     created_at: datetime
     modified_at: datetime
 
