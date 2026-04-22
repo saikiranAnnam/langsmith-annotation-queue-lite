@@ -19,7 +19,9 @@ async def create_queue(conn: asyncpg.Connection, name: str) -> dict:
         name=name,
     )
     row = await conn.fetchrow(query, *params)
-    return dict(row)
+    result = dict(row)
+    result["pending_count"] = 0 # a queue that was just created will always have zero pending entries.
+    return result
 
 
 async def list_queues(conn: asyncpg.Connection) -> list[dict]:
@@ -64,7 +66,9 @@ async def update_queue(conn: asyncpg.Connection, queue_id: UUID, name: str | Non
         UPDATE queues
         SET name = $name, modified_at = NOW()
         WHERE id = $queue_id
-        RETURNING id, name, created_at, modified_at
+        RETURNING id, name, created_at, modified_at,
+                  (SELECT COUNT(*) FROM queue_entries
+                   WHERE queue_id = $queue_id AND status = 'pending') AS pending_count
         """,
         name=name,
         queue_id=queue_id,
@@ -129,10 +133,11 @@ async def populate_queue(
     return True, None
 
 
-async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | None:
+async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID, user_id: str = "anonymous") -> dict | None:
     """
     Get the next pending entry from a queue.
     Returns None if queue is empty or queue doesn't exist.
+    user_id is the id of the user who is reserving the entry. (authentication is beyond the scope of this project)
     """
     # Verify queue exists
     query, params = prepare_query(
@@ -143,24 +148,50 @@ async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | Non
     if not exists:
         return False  # Signal queue not found
 
-    # Get the next pending entry
+    async with conn.transaction():
+        query, params = prepare_query(
+            """
+            SELECT id
+            FROM queue_entries
+            WHERE queue_id = $queue_id AND status = 'pending'
+            ORDER BY added_at
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """,
+            queue_id=queue_id,
+        )
+        locked_row = await conn.fetchrow(query, *params)
+
+        if not locked_row:
+            return None
+
+        query, params = prepare_query(
+            """
+            UPDATE queue_entries
+            SET status      = 'in_progress',
+                reserved_at = NOW(),
+                reserved_by = $user_id
+            WHERE id = $entry_id
+            """,
+            user_id=user_id,
+            entry_id=locked_row["id"],
+        )
+        await conn.execute(query, *params)
+
+    # Fetch full entry with trace join using the reserved entry id
     query, params = prepare_query(
         """
         SELECT qe.id, qe.trace_id, qe.queue_id, qe.status, qe.added_at,
+               qe.reserved_at, qe.reserved_by,
                t.id as trace_id, t.project_id, t.inputs, t.outputs,
                t.trace_metadata, t.start_time, t.end_time
         FROM queue_entries qe
         JOIN traces t ON t.id = qe.trace_id
-        WHERE qe.queue_id = $queue_id AND qe.status = 'pending'
-        ORDER BY qe.added_at
-        LIMIT 1
+        WHERE qe.id = $entry_id
         """,
-        queue_id=queue_id,
+        entry_id=locked_row["id"],
     )
     row = await conn.fetchrow(query, *params)
-
-    if not row:
-        return None  # Signal empty queue
 
     # Build result with trace data
     result = dict(row)
@@ -185,6 +216,8 @@ async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | Non
         "queue_id": result["queue_id"],
         "status": result["status"],
         "added_at": result["added_at"],
+        "reserved_at": result["reserved_at"],
+        "reserved_by": result["reserved_by"],
         "trace": trace_data,
     }
 

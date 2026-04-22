@@ -2,7 +2,6 @@
 
 from httpx import AsyncClient
 
-
 async def test_create_queue(client: AsyncClient):
     """Test creating a new queue."""
     response = await client.post("/queues", json={"name": "My Test Queue"})
@@ -162,23 +161,24 @@ async def test_populate_queue_trace_not_found(client: AsyncClient, sample_queue)
 
 async def test_get_next_entry(client: AsyncClient, sample_queue_entry):
     """Test getting the next entry from a queue."""
+    """in_progress status is set when the entry is reserved."""
     response = await client.get(f"/queues/{sample_queue_entry['queue_id']}/entries/next")
 
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_queue_entry["id"])
-    assert data["status"] == "pending"
+    assert data["status"] == "in_progress"
     assert "trace" in data
     assert data["trace"]["id"] == str(sample_queue_entry["trace_id"])
 
 
 async def test_get_next_entry_empty_queue(client: AsyncClient, sample_queue):
     """Test getting next entry from an empty queue."""
+    """No pending entries in queue is returned when the queue is empty."""
     response = await client.get(f"/queues/{sample_queue['id']}/entries/next")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Queue is empty"
-
 
 async def test_get_next_entry_queue_not_found(client: AsyncClient):
     """Test getting next entry from non-existent queue."""
@@ -188,6 +188,15 @@ async def test_get_next_entry_queue_not_found(client: AsyncClient):
     assert response.status_code == 404
     assert response.json()["detail"] == "Queue not found"
 
+async def test_get_next_entry_sets_in_progress(client: AsyncClient, sample_queue_entry):
+    """Test getting next entry sets the entry to reserved and mark it in_progress status."""
+    response = await client.get(f"/queues/{sample_queue_entry['queue_id']}/entries/next")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(sample_queue_entry["id"])
+    assert data["status"] == "in_progress"
+    assert data["reserved_at"] is not None
+    assert data["reserved_by"] is not None
 
 async def test_get_next_entry_fifo_order(client: AsyncClient, sample_queue, db_conn, sample_project):
     """Test that entries are returned in FIFO order."""
