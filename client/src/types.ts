@@ -20,6 +20,7 @@ export type Queue = {
   name: string;
   created_at: string;
   modified_at: string;
+  pending_count: number;
 };
 
 export type QueueEntry = {
@@ -28,6 +29,8 @@ export type QueueEntry = {
   queue_id: string;
   status: string;
   added_at: string;
+  reserved_at?: string | null;
+  reserved_by?: string | null;
   trace: Trace;
 };
 

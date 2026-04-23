@@ -1,7 +1,8 @@
 import useSWR from "swr";
 import useSWRMutation from "swr/mutation";
-import { API_BASE, fetcher, postData } from "../lib/api";
+import { API_BASE, fetcher, postData, patchData } from "../lib/api";
 import type {
+  Feedback,
   FeedbackCreate,
   Queue,
   QueueEntry,
@@ -124,6 +125,23 @@ export function useSubmitFeedback() {
             return postData(url, arg);
         }
     );
+}
+
+export function useTraceFeedback(traceId: string | null) {
+  const { data, error, isLoading, mutate } = useSWR<Feedback[]>(
+    traceId ? `${API_BASE}/traces/${traceId}/feedback` : null,
+    fetcher
+  );
+  return {feedback: data || [], isLoading, isError: error, mutate};
+}
+
+export function useUpdateFeedback(){
+  return useSWRMutation(
+    "update-feedback",
+    async (_, { arg }: { arg: { feedbackId: string; data: Partial<Feedback> } }) => {
+      return patchData<Feedback>(`${API_BASE}/feedback/${arg.feedbackId}`, arg.data);
+    }
+  );
 }
 
 export function useCompleteQueueEntry() {
