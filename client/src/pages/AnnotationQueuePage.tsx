@@ -5,31 +5,7 @@ import { useQueueSession } from "../hooks/useQueueSession";
 import { useQueue } from "../hooks/useApi";
 import { useFeedbackManager } from "../hooks/useFeedbackManager";
 import { RubricSidebar } from "../components/RubricSidebar";
-
-// Turns a JSON value into syntax-highlighted HTML.
-function highlightJson(value: unknown): string {
-  const json = JSON.stringify(value, null, 2) ?? "";
-  return json
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(
-      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
-      (match) => {
-        // a quoted string followed by ":" is a key, everything else is a value
-        if (/^"/.test(match) && /:$/.test(match))
-          return `<span class="text-blue-600 font-semibold">${match}</span>`;
-        if (/^"/.test(match))
-          return `<span class="text-green-600">${match}</span>`;
-        if (/true|false/.test(match))
-          return `<span class="text-purple-600">${match}</span>`;
-        if (/null/.test(match))
-          return `<span class="text-gray-400">${match}</span>`;
-        // anything left is a number
-        return `<span class="text-orange-500">${match}</span>`;
-      }
-    );
-}
+import { JsonViewer } from "../components/JsonViewer";
 
 export function AnnotationQueuePage() {
   const { queueId } = useParams<{ queueId: string }>();
@@ -129,10 +105,7 @@ export function AnnotationQueuePage() {
               )}
             </button>
             {inputOpen && (
-              <pre
-                className="px-4 pb-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[40vh] border-t border-gray-100"
-                dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.inputs) }}
-              />
+              <JsonViewer value={entry?.trace.inputs} path="inputs" />
             )}
           </div>
 
@@ -161,10 +134,7 @@ export function AnnotationQueuePage() {
               )}
             </button>
             {outputOpen && (
-              <pre
-                className="px-4 pb-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[40vh] border-t border-gray-100"
-                dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.outputs) }}
-              />
+              <JsonViewer value={entry?.trace.outputs} path="outputs" />
             )}
           </div>
         </div>
