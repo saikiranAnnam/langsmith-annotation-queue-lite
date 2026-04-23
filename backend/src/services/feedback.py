@@ -32,6 +32,7 @@ async def create_feedback_batch(
         return None, missing_trace_ids  # Signal missing traces
 
     # Prepare batch insert data
+    # Fix: included span_path, span_start_index, span_end_index in the insert values.
     insert_values = []
     for feedback in feedback_batch:
         insert_values.append(
@@ -40,27 +41,47 @@ async def create_feedback_batch(
                 feedback.key,
                 feedback.score,
                 feedback.comment,
+                orjson.dumps(feedback.span_path).decode() if feedback.span_path else None,
+                feedback.span_start_index,
+                feedback.span_end_index,
             )
         )
 
     # Insert all feedback items in batch
     rows = await conn.fetch(
         """
-        INSERT INTO feedback (trace_id, key, score, comment)
-        SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::float[], $4::text[])
-        RETURNING id, trace_id, key, score, comment, created_at, modified_at
+        INSERT INTO feedback (trace_id, key, score, comment, span_path, span_start_index, span_end_index)
+        SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::float[], $4::text[], $5::jsonb[], $6::int[], $7::int[])
+        RETURNING id, trace_id, key, score, comment, span_path, span_start_index, span_end_index, created_at, modified_at
         """,
         [v[0] for v in insert_values],  # trace_ids
         [v[1] for v in insert_values],  # keys
         [v[2] for v in insert_values],  # scores
         [v[3] for v in insert_values],  # comments
+        [v[4] for v in insert_values],  # span_paths
+        [v[5] for v in insert_values],  # span_start_indices
+        [v[6] for v in insert_values],  # span_end_indices
     )
 
     # Process results
     results = [dict(row) for row in rows]
     return results
 
-
+# Read a single feedback record, including span metadata.
+async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | None:
+    query, params = prepare_query(
+        """
+        SELECT id, trace_id, key, score, comment,
+               span_path, span_start_index, span_end_index,
+               created_at, modified_at
+        FROM feedback
+        WHERE id = $feedback_id
+        """,
+        feedback_id=feedback_id,
+    )
+    row = await conn.fetchrow(query, *params)
+    return dict(row) if row else None
+    
 async def update_feedback(
     conn: asyncpg.Connection,
     feedback_id: UUID,
