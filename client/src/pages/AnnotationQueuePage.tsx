@@ -1,6 +1,10 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { Maximize2, Minimize2, CircleCheckBig } from "lucide-react";
 import { useQueueSession } from "../hooks/useQueueSession";
 import { useQueue } from "../hooks/useApi";
+import { useFeedbackManager } from "../hooks/useFeedbackManager";
+import { RubricSidebar } from "../components/RubricSidebar";
 
 // Turns a JSON value into syntax-highlighted HTML.
 function highlightJson(value: unknown): string {
@@ -34,6 +38,14 @@ export function AnnotationQueuePage() {
   const { entry, isLoading, isEmpty, completeEntry, skipEntry } =
     useQueueSession(queueId!);
 
+  const { feedbackMap, submitFeedback } = useFeedbackManager(
+    entry?.trace_id ?? null
+  );
+
+  // Both panels expanded by default so reviewers see the full content on load
+  const [inputOpen, setInputOpen] = useState(true);
+  const [outputOpen, setOutputOpen] = useState(true);
+
   // Still waiting for the first entry to come back from the backend
   if (isLoading) {
     return (
@@ -55,57 +67,113 @@ export function AnnotationQueuePage() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header: queue name on the left, action buttons on the right */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-400 uppercase tracking-wide">Queue</p>
-          <h2 className="font-semibold text-gray-900">{queue?.name ?? "..."}</h2>
+      {/* Two-column header mirroring the content layout below */}
+      <div className="bg-white flex items-center shrink-0 h-16">
+        {/* Left column — aligns with the annotation/input-output panel */}
+        <div className="flex-1 flex items-center justify-between px-6 h-full border-b border-gray-200">
+          <div>
+            <p className="text-[10px] font-medium text-gray-400 uppercase tracking-widest">Queue</p>
+            <p className="text-base font-semibold text-gray-900 leading-snug">{queue?.name ?? "..."}</p>
+          </div>
+          <div className="flex items-center gap-2.5">
+            {/* Skip requeues the entry so another reviewer can pick it up later */}
+            <button
+              onClick={skipEntry}
+              className="h-8 px-4 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 hover:border-gray-400 transition-all duration-150"
+            >
+              Skip
+            </button>
+            {/* Complete marks the entry done and immediately loads the next one */}
+            <button
+              onClick={completeEntry}
+              className="h-8 flex items-center gap-2 px-4 text-sm font-semibold text-white bg-green-600 rounded-md shadow-sm hover:bg-green-700 active:bg-green-800 transition-all duration-150"
+            >
+              <CircleCheckBig className="w-3.5 h-3.5 shrink-0" />
+              Complete & Next
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Skip requeues the entry so another reviewer can pick it up later */}
-          <button
-            onClick={skipEntry}
-            className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            Skip
-          </button>
-          {/* Complete marks the entry done and immediately loads the next one */}
-          <button
-            onClick={completeEntry}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-          >
-            Complete & Next
-          </button>
+        {/* Right column — aligns with the feedback rubric sidebar */}
+        <div className="w-[30%] min-w-72 border-l border-gray-200 px-5 h-full flex items-center">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-md font-semibold text-gray-900">Feedback Rubrics</h3>
+            <p className="text-xs text-gray-400">Select a rubric to expand and annotate.</p>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex gap-4 p-6 overflow-auto items-start">
-          {/* Input panel — what was sent to the model by the user */}
-          <div className="flex-1 flex flex-col gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Input
-            </p>
-            <pre
-              className="bg-white border border-gray-200 rounded-lg p-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[70vh]"
-              dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.inputs) }}
-            />
+        <div className="flex-1 flex flex-col gap-4 p-6 overflow-auto">
+          {/* Input panel */}
+          <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+            <button
+              onClick={() => setInputOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 shrink-0">
+                  Input
+                </span>
+                {/* Preview only shown when collapsed — hidden when expanded since full content is visible below */}
+                {!inputOpen && (
+                  <span className="text-xs text-gray-500 truncate">
+                    {entry?.trace.inputs?.question}
+                  </span>
+                )}
+              </div>
+              {/* Maximize2 = expand (collapsed state), Minimize2 = collapse (expanded state) */}
+              {inputOpen ? (
+                <Minimize2 className="w-4 h-4 text-gray-400 shrink-0" />
+              ) : (
+                <Maximize2 className="w-4 h-4 text-gray-400 shrink-0" />
+              )}
+            </button>
+            {inputOpen && (
+              <pre
+                className="px-4 pb-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[40vh] border-t border-gray-100"
+                dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.inputs) }}
+              />
+            )}
           </div>
-          {/* Output panel - what the model responded with */}
-          <div className="flex-1 flex flex-col gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Output
-            </p>
-            <pre
-              className="bg-white border border-gray-200 rounded-lg p-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[70vh]"
-              dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.outputs) }}
-            />
+
+          {/* Output panel */}
+          <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+            <button
+              onClick={() => setOutputOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 shrink-0">
+                  Output
+                </span>
+                {/* Preview only shown when collapsed — hidden when expanded since full content is visible below */}
+                {!outputOpen && (
+                  <span className="text-xs text-gray-500 truncate">
+                    {entry?.trace.outputs?.answer}
+                  </span>
+                )}
+              </div>
+              {/* Maximize2 = expand (collapsed state), Minimize2 = collapse (expanded state) */}
+              {outputOpen ? (
+                <Minimize2 className="w-4 h-4 text-gray-400 shrink-0" />
+              ) : (
+                <Maximize2 className="w-4 h-4 text-gray-400 shrink-0" />
+              )}
+            </button>
+            {outputOpen && (
+              <pre
+                className="px-4 pb-4 text-xs font-mono overflow-auto whitespace-pre-wrap max-h-[40vh] border-t border-gray-100"
+                dangerouslySetInnerHTML={{ __html: highlightJson(entry?.trace.outputs) }}
+              />
+            )}
           </div>
         </div>
 
-        <div className="w-72 border-l border-gray-200 bg-white p-4 text-sm text-gray-400">
-          Rubric sidebar coming soon
-        </div>
+        <RubricSidebar
+          queueId={queueId!}
+          feedbackMap={feedbackMap}
+          onSubmit={submitFeedback}
+        />
       </div>
     </div>
   );
