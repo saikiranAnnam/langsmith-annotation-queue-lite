@@ -5,7 +5,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def requeue_stuck_entries(pool, stale_after_seconds: int) -> int:
-    """Every interval, requeue in_progress entries older than the threshold."""
+    """Reset in_progress queue entries whose reservation has exceeded the TTL back to pending."""
     async with pool.acquire() as conn:
         result = await conn.execute(
             """
@@ -14,6 +14,8 @@ async def requeue_stuck_entries(pool, stale_after_seconds: int) -> int:
                 reserved_at = NULL,
                 reserved_by = NULL
             WHERE status = 'in_progress'
+            -- reserved_by IS NOT NULL guards against resetting manually-inserted pending
+            -- entries that have no reserved_at and were never part of a reviewer session.
             AND reserved_by IS NOT NULL
             AND reserved_at < NOW() - ($1 * interval '1 second')
             """,
@@ -24,12 +26,12 @@ async def requeue_stuck_entries(pool, stale_after_seconds: int) -> int:
     return count
 
 async def requeue_stuck_entries_loop(
-    pool, 
+    pool,
     interval_seconds: int,
     stale_after_seconds: int,
     stop_event: asyncio.Event,
 ) -> None:
-    """Run the requeue_stuck_entries job in a loop."""
+    """Periodically recover queue entries left in_progress when a reviewer's session crashes or times out."""
     logger.info("Starting stuck-entry requeue loop: interval=%s, stale_after=%s", 
         interval_seconds, 
         stale_after_seconds)

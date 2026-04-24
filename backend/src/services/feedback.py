@@ -21,7 +21,7 @@ async def create_feedback_batch(
     conn: asyncpg.Connection,
     feedback_batch: list[schemas.FeedbackCreate],
 ) -> list[dict]:
-    """Create multiple feedback items at once."""
+    """Upsert a batch of feedback records — first submit creates, re-score updates. Idempotent on (trace_id, key)."""
     if not feedback_batch:
         return None  # Signal empty batch error
 
@@ -81,8 +81,8 @@ async def create_feedback_batch(
 
     return [_parse_row(row) for row in rows]
 
-# Read a single feedback record, including span metadata.
 async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | None:
+    """Fetch a single feedback record by id, including any span selection metadata."""
     query, params = prepare_query(
         """
         SELECT id, trace_id, key, score, comment,
@@ -102,7 +102,7 @@ async def update_feedback(
     feedback_id: UUID,
     feedback_update: schemas.FeedbackUpdate,
 ) -> dict | None:
-    """Update a feedback item."""
+    """Partially update a feedback record. Only provided fields are written."""
     updates = {}
 
     if feedback_update.score is not None:
@@ -148,7 +148,7 @@ async def update_feedback(
 
 
 async def delete_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> bool:
-    """Delete a feedback item. Returns True if deleted, False if not found."""
+    """Delete a feedback record. Returns True if deleted, False if not found."""
     query, params = prepare_query(
         """
         DELETE FROM feedback
