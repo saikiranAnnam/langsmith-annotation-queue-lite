@@ -8,7 +8,7 @@ export function useQueueSession(queueId: string) {
   // Two users hitting this at the same time will get different entries using the database's FOR UPDATE SKIP LOCKED.
   const swrKey = `${API_BASE}/queues/${queueId}/entries/next`;
 
-  const { data: entry, isLoading, mutate } = useSWR<QueueEntry | null>(
+  const { data: entry, isLoading, error: loadError, mutate } = useSWR<QueueEntry | null>(
     swrKey,
     async (url) => {
       try {
@@ -40,7 +40,7 @@ export function useQueueSession(queueId: string) {
   const completeEntry = async () => {
     if (!entry) return;
     await triggerComplete({ queueId, entryId: entry.id });
-    // Clear the cache and re-fetch this automatically reserves the next pending entry
+    // Clear the cache and re-fetch — this automatically reserves the next pending entry
     mutate(undefined, { revalidate: true });
   };
 
@@ -54,8 +54,9 @@ export function useQueueSession(queueId: string) {
   return {
     entry: entry ?? null,
     isLoading,
-    // isEmpty is true only after loading finishes and there's genuinely nothing left
-    isEmpty: !isLoading && entry === null,
+    // isEmpty is true only after loading finishes with no error and genuinely nothing left
+    isEmpty: !isLoading && !loadError && entry === null,
+    isError: !!loadError,
     completeEntry,
     skipEntry,
   };
