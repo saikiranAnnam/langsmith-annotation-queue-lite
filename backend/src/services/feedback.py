@@ -1,11 +1,20 @@
 """Business logic for feedback."""
 
+import json
 from uuid import UUID
 
 import asyncpg
 
 from src import schemas
 from src.sql_utils import prepare_query
+
+
+def _parse_row(row: asyncpg.Record) -> dict:
+    """Convert an asyncpg row to a dict, deserializing span_path from its JSON string."""
+    d = dict(row)
+    if isinstance(d.get("span_path"), str):
+        d["span_path"] = json.loads(d["span_path"])
+    return d
 
 
 async def create_feedback_batch(
@@ -41,7 +50,7 @@ async def create_feedback_batch(
                 feedback.key,
                 feedback.score,
                 feedback.comment,
-                orjson.dumps(feedback.span_path).decode() if feedback.span_path else None,
+                json.dumps(feedback.span_path) if feedback.span_path else None,
                 feedback.span_start_index,
                 feedback.span_end_index,
             )
@@ -63,9 +72,7 @@ async def create_feedback_batch(
         [v[6] for v in insert_values],  # span_end_indices
     )
 
-    # Process results
-    results = [dict(row) for row in rows]
-    return results
+    return [_parse_row(row) for row in rows]
 
 # Read a single feedback record, including span metadata.
 async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | None:
@@ -80,15 +87,15 @@ async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | No
         feedback_id=feedback_id,
     )
     row = await conn.fetchrow(query, *params)
-    return dict(row) if row else None
-    
+    return _parse_row(row) if row else None
+
+
 async def update_feedback(
     conn: asyncpg.Connection,
     feedback_id: UUID,
     feedback_update: schemas.FeedbackUpdate,
 ) -> dict | None:
     """Update a feedback item."""
-    # Build dynamic update query with named params
     updates = {}
 
     if feedback_update.score is not None:
@@ -97,23 +104,31 @@ async def update_feedback(
     if feedback_update.comment is not None:
         updates["comment"] = feedback_update.comment
 
+    if feedback_update.span_path is not None:
+        # asyncpg expects jsonb as a serialized string for named-param queries
+        updates["span_path"] = json.dumps(feedback_update.span_path)
+
+    if feedback_update.span_start_index is not None:
+        updates["span_start_index"] = feedback_update.span_start_index
+
+    if feedback_update.span_end_index is not None:
+        updates["span_end_index"] = feedback_update.span_end_index
+
     if not updates:
         return None  # Signal no fields to update
 
-    # Build SET clause with named parameters
-    set_clauses = []
-    for field in updates.keys():
-        set_clauses.append(f"{field} = ${field}")
+    set_clauses = [f"{field} = ${field}" for field in updates.keys()]
     set_clauses.append("modified_at = NOW()")
 
     query_str = f"""
         UPDATE feedback
         SET {", ".join(set_clauses)}
         WHERE id = $feedback_id
-        RETURNING id, trace_id, key, score, comment, created_at, modified_at
+        RETURNING id, trace_id, key, score, comment,
+                  span_path, span_start_index, span_end_index,
+                  created_at, modified_at
     """
 
-    # Remove modified_at from params since we handle it with NOW()
     params_dict = dict(updates)
     params_dict["feedback_id"] = feedback_id
 
@@ -122,8 +137,7 @@ async def update_feedback(
     if not row:
         return False  # Signal not found
 
-    result = dict(row)
-    return result
+    return _parse_row(row)
 
 
 async def delete_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> bool:

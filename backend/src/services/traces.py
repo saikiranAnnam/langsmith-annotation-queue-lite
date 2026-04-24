@@ -148,7 +148,9 @@ async def list_trace_feedback(conn: asyncpg.Connection, trace_id: UUID) -> list[
 
     query, params = prepare_query(
         """
-        SELECT id, trace_id, key, score, comment, created_at, modified_at
+        SELECT id, trace_id, key, score, comment,
+               span_path, span_start_index, span_end_index,
+               created_at, modified_at
         FROM feedback
         WHERE trace_id = $trace_id
         ORDER BY created_at DESC
@@ -156,5 +158,11 @@ async def list_trace_feedback(conn: asyncpg.Connection, trace_id: UUID) -> list[
         trace_id=trace_id,
     )
     rows = await conn.fetch(query, *params)
-    results = [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        # asyncpg returns jsonb columns as raw strings — parse back to a list
+        if isinstance(d.get("span_path"), str):
+            d["span_path"] = orjson.loads(d["span_path"])
+        results.append(d)
     return results
