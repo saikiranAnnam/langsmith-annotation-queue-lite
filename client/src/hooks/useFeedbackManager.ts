@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTraceFeedback } from "./useApi";
-import { API_BASE, postData, patchData } from "../lib/api";
+import { API_BASE, postData } from "../lib/api";
 import type { Feedback, FeedbackSpan } from "../types";
 
 export function useFeedbackManager(traceId: string | null) {
@@ -38,22 +38,12 @@ export function useFeedbackManager(traceId: string | null) {
     setFeedbackMap((prev) => new Map(prev).set(key, optimistic));
 
     try {
-      let saved: Feedback;
-
-      if (prior?.id) {
-        // Feedback already exists for this key — update it
-        saved = await patchData<Feedback>(`${API_BASE}/feedback/${prior.id}`, {
-          score,
-          comment,
-          ...(span ?? {}),
-        });
-      } else {
-        // First time scoring this rubric item — create it
-        const batch = await postData<Feedback[]>(`${API_BASE}/feedback/batch`, [
-          { trace_id: traceId, key, score, comment, ...(span ?? {}) },
-        ]);
-        saved = batch[0];
-      }
+      // Always POST — the backend upserts on (trace_id, key) so create and
+      // update are the same call. No need to track whether feedback exists.
+      const batch = await postData<Feedback[]>(`${API_BASE}/feedback/batch`, [
+        { trace_id: traceId, key, score, comment, ...(span ?? {}) },
+      ]);
+      const saved = batch[0];
 
       setFeedbackMap((prev) => new Map(prev).set(key, saved));
     } catch (err) {

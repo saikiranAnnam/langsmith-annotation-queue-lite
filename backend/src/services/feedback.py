@@ -40,8 +40,7 @@ async def create_feedback_batch(
     if missing_trace_ids:
         return None, missing_trace_ids  # Signal missing traces
 
-    # Prepare batch insert data
-    # Fix: included span_path, span_start_index, span_end_index in the insert values.
+    # Build insert tuples — span fields are optional, None when not provided
     insert_values = []
     for feedback in feedback_batch:
         insert_values.append(
@@ -56,11 +55,19 @@ async def create_feedback_batch(
             )
         )
 
-    # Insert all feedback items in batch
+    # Upsert — ON CONFLICT updates the existing row so duplicate (trace_id, key)
+    # pairs are never created, regardless of what client is calling this endpoint.
     rows = await conn.fetch(
         """
         INSERT INTO feedback (trace_id, key, score, comment, span_path, span_start_index, span_end_index)
         SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::float[], $4::text[], $5::jsonb[], $6::int[], $7::int[])
+        ON CONFLICT (trace_id, key) DO UPDATE SET
+            score             = EXCLUDED.score,
+            comment           = EXCLUDED.comment,
+            span_path         = EXCLUDED.span_path,
+            span_start_index  = EXCLUDED.span_start_index,
+            span_end_index    = EXCLUDED.span_end_index,
+            modified_at       = NOW()
         RETURNING id, trace_id, key, score, comment, span_path, span_start_index, span_end_index, created_at, modified_at
         """,
         [v[0] for v in insert_values],  # trace_ids
