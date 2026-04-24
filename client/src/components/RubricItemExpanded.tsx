@@ -29,7 +29,7 @@ export function RubricItemExpanded({ item, existing, onSubmit, isFeedbackLoading
   const [comment, setComment] = useState(existing?.comment ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Explicit flag — only set by user input, cleared on save or entry change.
+  // Explicit flag — only set by reviewer input, cleared on save or queue entry transition.
   const [hasChanges, setHasChanges] = useState(false);
 
   const isDirty = hasChanges || !!pendingSpan;

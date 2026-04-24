@@ -22,8 +22,8 @@ export function AnnotationQueuePage() {
     entry?.trace_id ?? null
   );
 
-  // Feedbacks that have span data attached — passed to JsonViewer so it can
-  // render amber highlights directly on the relevant string values.
+  // Feedback records with span selections — passed to JsonViewer to render
+  // per-rubric-item highlights on the relevant trace output fields.
   const highlights = Array.from(feedbackMap.values()).filter(
     (f) => f.span_path != null
   );
@@ -142,7 +142,6 @@ export function AnnotationQueuePage() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col gap-4 p-6 overflow-auto">
-          {/* Input panel */}
           <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
             <button
               onClick={() => setInputOpen((v) => !v)}
@@ -173,7 +172,6 @@ export function AnnotationQueuePage() {
             )}
           </div>
 
-          {/* Output panel */}
           <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
             <button
               onClick={() => setOutputOpen((v) => !v)}

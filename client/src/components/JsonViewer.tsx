@@ -31,7 +31,7 @@ function JsonNode({
     return <span className="text-amber-500">{value}</span>;
 
   if (typeof value === "string") {
-    // All feedbacks with a span on this path, sorted left-to-right.
+    // Feedback records with a span selection on this JSON path, sorted so segments render left-to-right.
     const hits = highlights
       .filter(
         (f) =>
@@ -143,13 +143,13 @@ export interface JsonViewerProps {
   value: unknown;
   /** Dot-notation prefix for data-path attributes, e.g. "inputs" or "outputs" */
   path?: string;
-  /** Feedbacks that have span data — their spans are rendered as amber highlights */
+  /** Feedback records with span selections — rendered as colored marks keyed by rubric item. */
   highlights?: Feedback[];
 }
 
 export function JsonViewer({ value, path = "", highlights = [] }: JsonViewerProps) {
-  // When the user hovers a highlighted mark we store the feedback + element
-  // rect here so we can position the tooltip right above the mark.
+  // When the reviewer hovers a highlighted span we store the feedback record + element
+  // rect so the tooltip can be positioned directly above the mark.
   const [tooltip, setTooltip] = useState<{ feedback: Feedback; rect: DOMRect } | null>(null);
 
   return (

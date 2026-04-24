@@ -2,8 +2,8 @@ import type { Feedback } from "../types";
 
 interface Props {
   feedback: Feedback;
-  // The bounding rect of the <mark> element the user is hovering over.
-  // We use this to position the tooltip directly above it.
+  // Bounding rect of the <mark> element the reviewer is hovering.
+  // Used to position the tooltip directly above the highlighted span.
   anchorRect: DOMRect;
 }
 
