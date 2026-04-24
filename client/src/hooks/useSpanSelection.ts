@@ -20,7 +20,7 @@ export function useSpanSelection(highlights: Feedback[] = []) {
       const range = selection.getRangeAt(0);
 
       // commonAncestorContainer is the deepest DOM node that contains both the
-      // start and end of the selection. If the user dragged within a single field
+      // start and end of the selection. If the reviewer dragged within a single field
       // it will be that field's span (or a node inside it). If they dragged across
       // multiple fields it will be a higher-level ancestor with no data-path.
       const ancestor = range.commonAncestorContainer;
@@ -30,7 +30,7 @@ export function useSpanSelection(highlights: Feedback[] = []) {
           : (ancestor as Text).parentElement?.closest("[data-path]");
 
       if (!el) {
-        // Selection crossed a field boundary — too ambiguous to store
+        // Span crosses a JSON field boundary — offsets would be ambiguous, reject silently.
         setPendingSpan(null);
         setPendingText(null);
         setOverlapWarning(false);

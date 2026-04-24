@@ -4,8 +4,8 @@ import { API_BASE, fetcher, postData } from "../lib/api";
 import type { QueueEntry } from "../types";
 
 export function useQueueSession(queueId: string) {
-  // Fetching this URL also reserves the entry on the backend (sets it to in_progress).
-  // Two users hitting this at the same time will get different entries using the database's FOR UPDATE SKIP LOCKED.
+  // Fetching this URL also reserves the queue entry on the backend (sets it to in_progress).
+  // Two reviewers hitting this concurrently get different entries via FOR UPDATE SKIP LOCKED.
   const swrKey = `${API_BASE}/queues/${queueId}/entries/next`;
 
   const { data: entry, isLoading, error: loadError, mutate } = useSWR<QueueEntry | null>(
@@ -20,7 +20,7 @@ export function useQueueSession(queueId: string) {
       }
     },
     {
-      revalidateOnFocus: false, // don't reserve a new entry just because the user switched tabs
+      revalidateOnFocus: false, // switching tabs would trigger a fetch, which also reserves an entry
       shouldRetryOnError: false,
     }
   );

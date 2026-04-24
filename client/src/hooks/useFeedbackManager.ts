@@ -6,8 +6,8 @@ import type { Feedback, FeedbackSpan } from "../types";
 export function useFeedbackManager(traceId: string | null) {
   const { feedback: existing, isLoading: isFeedbackLoading } = useTraceFeedback(traceId);
 
-  // Local map of key → Feedback 
-  // so we can update individual items without re-fetching all
+  // Local map of rubric key → feedback record so individual rubric items
+  // can be updated optimistically without re-fetching the full trace feedback.
   const [feedbackMap, setFeedbackMap] = useState<Map<string, Feedback>>(new Map());
 
   // When the trace changes, rebuild the map from server data
@@ -15,6 +15,8 @@ export function useFeedbackManager(traceId: string | null) {
     const map = new Map<string, Feedback>();
     existing.forEach((f) => map.set(f.key, f));
     setFeedbackMap(map);
+  // Depend on length, not the array reference — rebuilds when entries are added
+  // or removed, not on every re-render where the array identity changes.
   }, [traceId, existing.length]);
 
   const submitFeedback = async (
