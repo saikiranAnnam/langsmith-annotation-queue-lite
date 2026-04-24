@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { Loader2, CircleCheckBig, SendHorizonal } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Loader2, SendHorizonal } from "lucide-react";
 import { RubricScoreInput } from "./RubricScoreInput";
+import { toast } from "sonner";
 import type { Feedback, FeedbackSpan, QueueRubricItem } from "../types";
 
 type Props = {
@@ -12,61 +13,79 @@ type Props = {
     comment: string,
     span?: FeedbackSpan
   ) => Promise<void>;
+  // True while existing feedback for this trace is still being fetched.
+  isFeedbackLoading?: boolean;
+  // The span the reviewer highlighted in the JSON viewer, if any.
+  // Shown as a small banner so they can confirm before submitting.
+  pendingSpan?: FeedbackSpan | null;
+  pendingText?: string | null;
+  // True when the pending span overlaps an already-saved highlight.
+  overlapWarning?: boolean;
+  onClearSpan?: () => void;
 };
 
-export function RubricItemExpanded({ item, existing, onSubmit }: Props) {
+export function RubricItemExpanded({ item, existing, onSubmit, isFeedbackLoading, pendingSpan, pendingText, overlapWarning, onClearSpan }: Props) {
   const [score, setScore] = useState(existing?.score?.toString() ?? "");
   const [comment, setComment] = useState(existing?.comment ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // Explicit flag — only set by user input, cleared on save or entry change.
+  const [hasChanges, setHasChanges] = useState(false);
 
-  // Saved baseline — updated after each successful save so dirty check stays accurate
-  const [savedScore, setSavedScore] = useState(existing?.score?.toString() ?? "");
-  const [savedComment, setSavedComment] = useState(existing?.comment ?? "");
-
-  // True only when values differ from last saved state
-  const isDirty = score !== savedScore || comment !== savedComment;
+  const isDirty = hasChanges || !!pendingSpan;
 
   // Pre-fill when existing feedback loads (e.g. after entry transition)
   useEffect(() => {
-    const s = existing?.score?.toString() ?? "";
-    const c = existing?.comment ?? "";
-    setScore(s);
-    setComment(c);
-    setSavedScore(s);
-    setSavedComment(c);
+    setScore(existing?.score?.toString() ?? "");
+    setComment(existing?.comment ?? "");
+    setHasChanges(false);
     setError(null);
-    setSaved(false);
   }, [existing?.id]);
 
-  // Reset saved state back to default after 2s so button returns to "Save feedback"
+  // Clear the pending span only when the reviewer switches to a *different* item —
+  // not on initial mount, otherwise opening a card would immediately wipe the span.
+  const hasMounted = useRef(false);
   useEffect(() => {
-    if (!saved) return;
-    const t = setTimeout(() => setSaved(false), 2000);
-    return () => clearTimeout(t);
-  }, [saved]);
+    if (!hasMounted.current) { hasMounted.current = true; return; }
+    onClearSpan?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSaved(false);
     setIsSubmitting(true);
+    const hadSpan = !!pendingSpan;
     try {
-      // Run the API call and a 300ms minimum delay in parallel so the spinner never flashes
       await Promise.all([
-        onSubmit(item.feedback_key, score !== "" ? parseFloat(score) : null, comment),
+        onSubmit(
+          item.feedback_key,
+          score !== "" ? parseFloat(score) : null,
+          comment,
+          pendingSpan ?? undefined
+        ),
         new Promise((res) => setTimeout(res, 300)),
       ]);
-      setSaved(true);
-      setSavedScore(score);
-      setSavedComment(comment);
+      onClearSpan?.();
+      setHasChanges(false);
+      toast.success(hadSpan ? "Feedback saved with highlight" : "Feedback saved");
     } catch {
       setError("Failed to save. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (isFeedbackLoading) {
+    return (
+      <div className="flex flex-col gap-3 pt-3 mt-1 border-t border-gray-100 animate-pulse">
+        <div className="h-3 bg-gray-100 rounded w-3/4" />
+        <div className="h-8 bg-gray-100 rounded-lg" />
+        <div className="h-16 bg-gray-100 rounded-lg" />
+        <div className="h-9 bg-gray-100 rounded-lg" />
+      </div>
+    );
+  }
 
   return (
     <form
@@ -77,30 +96,55 @@ export function RubricItemExpanded({ item, existing, onSubmit }: Props) {
 
       <RubricScoreInput
         value={score}
-        onChange={(val) => { setScore(val); setSaved(false); }}
+        onChange={(val) => { setScore(val); setHasChanges(true); }}
       />
 
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-medium text-gray-600">Comment</label>
         <textarea
           value={comment}
-          onChange={(e) => { setComment(e.target.value); setSaved(false); }}
+          onChange={(e) => { setComment(e.target.value); setHasChanges(true); }}
           placeholder="Why did you give this score?"
           rows={3}
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
       </div>
 
+      {/* Shows the span the reviewer highlighted in the JSON viewer.
+          They can dismiss it with ✕ if they don't want to attach it. */}
+      {pendingSpan && (
+        <div className={`flex items-center justify-between text-xs rounded-lg px-3 py-2 gap-2 border ${
+          overlapWarning
+            ? "bg-orange-50 border-orange-300"
+            : "bg-amber-50 border-amber-200"
+        }`}>
+          <div className="min-w-0">
+            <p className={`font-medium ${overlapWarning ? "text-orange-800" : "text-amber-800"}`}>
+              {overlapWarning ? "Overlaps existing highlight" : "Highlighted Text"}
+            </p>
+            <p className={`truncate ${overlapWarning ? "text-orange-700" : "text-amber-700"}`}>
+              {overlapWarning
+                ? "This selection overlaps a saved highlight — submitting will skip the overlapping portion."
+                : (pendingText ?? pendingSpan.span_path.join("."))}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClearSpan}
+            className={`shrink-0 leading-none ${overlapWarning ? "text-orange-500 hover:text-orange-700" : "text-amber-500 hover:text-amber-700"}`}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {error && <p className="text-xs text-red-500">{error}</p>}
 
-      {/* Button transitions between default → saving → saved, all inline */}
       <button
         type="submit"
-        disabled={!isDirty || isSubmitting || saved}
-        className={`w-full h-9 flex items-center justify-center gap-2 text-sm font-medium text-white rounded-lg transition-all duration-300 ${
-          saved
-            ? "bg-green-500 scale-[1.01]"
-            : isSubmitting
+        disabled={!isDirty || isSubmitting}
+        className={`w-full h-9 flex items-center justify-center gap-2 text-sm font-medium text-white rounded-lg transition-colors ${
+          isSubmitting
             ? "bg-blue-600 opacity-70"
             : isDirty
             ? "bg-blue-600 hover:bg-blue-700"
@@ -111,11 +155,6 @@ export function RubricItemExpanded({ item, existing, onSubmit }: Props) {
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
             Saving...
-          </>
-        ) : saved ? (
-          <>
-            <CircleCheckBig className="w-4 h-4 animate-bounce" />
-            Saved!
           </>
         ) : (
           <>

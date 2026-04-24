@@ -12,9 +12,14 @@ type Props = {
     comment: string,
     span?: FeedbackSpan
   ) => Promise<void>;
+  isFeedbackLoading?: boolean;
+  pendingSpan?: FeedbackSpan | null;
+  pendingText?: string | null;
+  overlapWarning?: boolean;
+  onClearSpan?: () => void;
 };
 
-export function RubricSidebar({ queueId, feedbackMap, onSubmit }: Props) {
+export function RubricSidebar({ queueId, feedbackMap, isFeedbackLoading, onSubmit, pendingSpan, pendingText, overlapWarning, onClearSpan }: Props) {
   const { rubric, isLoading } = useQueueRubric(queueId);
 
   // Only one card expanded at a time
@@ -47,6 +52,11 @@ export function RubricSidebar({ queueId, feedbackMap, onSubmit }: Props) {
                 setActiveKey(activeKey === item.feedback_key ? null : item.feedback_key)
               }
               onSubmit={onSubmit}
+              isFeedbackLoading={isFeedbackLoading}
+              pendingSpan={pendingSpan}
+              pendingText={pendingText}
+              overlapWarning={overlapWarning}
+              onClearSpan={onClearSpan}
             />
           ))
         )}

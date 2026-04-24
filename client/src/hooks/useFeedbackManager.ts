@@ -4,7 +4,7 @@ import { API_BASE, postData, patchData } from "../lib/api";
 import type { Feedback, FeedbackSpan } from "../types";
 
 export function useFeedbackManager(traceId: string | null) {
-  const { feedback: existing } = useTraceFeedback(traceId);
+  const { feedback: existing, isLoading: isFeedbackLoading } = useTraceFeedback(traceId);
 
   // Local map of key → Feedback 
   // so we can update individual items without re-fetching all
@@ -67,5 +67,5 @@ export function useFeedbackManager(traceId: string | null) {
     }
   };
 
-  return { feedbackMap, submitFeedback };
+  return { feedbackMap, isFeedbackLoading, submitFeedback };
 }
