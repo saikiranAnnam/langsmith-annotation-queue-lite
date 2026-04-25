@@ -52,6 +52,10 @@ export function QueuesPage() {
                     </h3>
                     <p className="text-sm text-gray-500">
                       Created {new Date(queue.created_at).toLocaleDateString()}
+                      {" · "}
+                      <span className="font-medium text-purple-600">
+                        {queue.pending_count} pending
+                      </span>
                     </p>
                   </div>
                 </div>
