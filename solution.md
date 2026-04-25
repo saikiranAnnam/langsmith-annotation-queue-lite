@@ -87,7 +87,7 @@ The architecture is designed around three independent modules:
 
 ### Component structure (frontend)
 
-[frontend-component](assets/fronted-component.png)
+[frontend-component](assets/frontend-component.png)
 
 ---
 
@@ -138,21 +138,21 @@ The starter code did a plain `SELECT` with no locking. Here's what replaced it a
 
 **Backend — reservation logic:**
 
-👉 [`backend/src/services/queues.py` → `get_next_entry()` L136](backend/src/services/queues.py#L136)
+👉 [`backend/src/services/queues.py` → `get_next_entry()` L138](backend/src/services/queues.py#L138)
 
 
 **Frontend — why fetching the URL is the reservation:**
 
-👉 [`client/src/hooks/useQueueSession.ts` L6](client/src/hooks/useQueueSession.ts#L6)
+👉 [`client/src/hooks/useQueueSession.ts` L7](client/src/hooks/useQueueSession.ts#L7)
 
 The SWR fetch to `/queues/:id/entries/next` is not a read-only call, it also triggers the backend reservation. 
 
-This is documented in a comment at L7–8. `revalidateOnFocus: false` is set deliberately so switching tabs doesn't accidentally reserve a second entry.
+This is documented in a comment at L8–10. `revalidateOnFocus: false` is set deliberately so switching tabs doesn't accidentally reserve a second entry.
 
 **Complete and Skip:**
 
-👉 [`backend/src/services/queues.py` → `complete_entry()` L225](backend/src/services/queues.py#L225)
-👉 [`backend/src/services/queues.py` → `requeue_entry()` L259](backend/src/services/queues.py#L259)
+👉 [`backend/src/services/queues.py` → `complete_entry()` L251](backend/src/services/queues.py#L251)
+👉 [`backend/src/services/queues.py` → `requeue_entry()` L284](backend/src/services/queues.py#L284)
 
 Skip resets status to `pending` and bumps `added_at = NOW()` so the entry goes to the back of the FIFO queue rather than immediately coming back up.
 
@@ -164,7 +164,7 @@ The reservation status persists in the DB — if a browser crashes, that entry s
 
 **Background job:** (Extra Feature)
 
-👉 [`backend/src/jobs/requeue_stuck_entries.py` → `requeue_stuck_entries_loop()` L26](backend/src/jobs/requeue_stuck_entries.py#L26)
+👉 [`backend/src/jobs/requeue_stuck_entries.py` → `requeue_stuck_entries_loop()` L30](backend/src/jobs/requeue_stuck_entries.py#L30)
 
 Runs every `interval_seconds` (default 5 min). Resets any `in_progress` entry where `reserved_at < NOW() - stale_after_seconds` (default 30 min) back to `pending`. 
 
@@ -173,7 +173,7 @@ Both values are env vars — an on-call operator can tune them without a redeplo
 
 **Wired into app startup:**
 
-👉 [`backend/src/main.py` → lifespan L23](backend/src/main.py#L23)
+👉 [`backend/src/main.py` → lifespan L14](backend/src/main.py#L14)
 
 Started as an `asyncio.create_task` in the FastAPI lifespan. Receives a `stop_event` so it shuts down cleanly when the server stops. Can be disabled via `REQUEUE_STUCK_ENTRIES_ENABLED=false`.
 
@@ -206,7 +206,7 @@ Positioned using the `<mark>` element's bounding rect via `fixed` positioning. `
 **Storage (backend):**
 
 👉 [`backend/src/services/feedback.py` → `create_feedback_batch()` L20](backend/src/services/feedback.py#L20)
-👉 [`backend/src/services/feedback.py` → `update_feedback()` L92](backend/src/services/feedback.py#L92)
+👉 [`backend/src/services/feedback.py` → `update_feedback()` L101](backend/src/services/feedback.py#L101)
 
 `span_path` is serialized to JSON string for storage (asyncpg JSONB requirement) and deserialized back by `_parse_row()` on read.
 
@@ -216,7 +216,7 @@ Positioned using the `<mark>` element's bounding rect via `fixed` positioning. `
 
 Scoring a rubric item always calls `POST /feedback/batch`. The backend upserts on `UNIQUE(trace_id, key)` — first submit creates the row, subsequent submits update it. The frontend no longer needs to track whether feedback exists to decide which HTTP method to use.
 
-👉 [`client/src/hooks/useFeedbackManager.ts` → `submitFeedback()` L20](client/src/hooks/useFeedbackManager.ts#L20)
+👉 [`client/src/hooks/useFeedbackManager.ts` → `submitFeedback()` L22](client/src/hooks/useFeedbackManager.ts#L22)
 👉 [`backend/src/services/feedback.py` → `create_feedback_batch()` L20](backend/src/services/feedback.py#L20)
 
 ```
@@ -234,8 +234,8 @@ Optimistic updates happen before the server responds — the score badge updates
 The page wires the three domains together. Each section below is independent — the page is just the integration point.
 
 👉 [`client/src/pages/AnnotationQueuePage.tsx`](client/src/pages/AnnotationQueuePage.tsx)
-👉 [`client/src/components/RubricSidebar.tsx` → `RubricSidebar()` L22](client/src/components/RubricSidebar.tsx#L22)
-👉 [`client/src/components/RubricItemExpanded.tsx` → `RubricItemExpanded()` L27](client/src/components/RubricItemExpanded.tsx#L27)
+👉 [`client/src/components/RubricSidebar.tsx` → `RubricSidebar()` L31](client/src/components/RubricSidebar.tsx#L31)
+👉 [`client/src/components/RubricItemExpanded.tsx` → `RubricItemExpanded()` L32](client/src/components/RubricItemExpanded.tsx#L32)
 
 One rubric item is expanded at a time. When expanded, `RubricItemExpanded` shows the pending span preview (if a span was selected) and the score + comment form. Submitting calls back up to `useFeedbackManager.submitFeedback`.
 
