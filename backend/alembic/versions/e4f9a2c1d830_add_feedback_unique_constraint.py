@@ -10,15 +10,15 @@ direct API call or second client could create duplicates. The batch insert
 now uses ON CONFLICT DO UPDATE (upsert), so the constraint is enforced
 at the DB level regardless of the caller.
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 from alembic import op
 
-
-revision: str = 'e4f9a2c1d830'
-down_revision: Union[str, Sequence[str], None] = 'b66454c4a9b1'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "e4f9a2c1d830"
+down_revision: str | Sequence[str] | None = "b66454c4a9b1"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

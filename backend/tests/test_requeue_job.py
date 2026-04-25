@@ -1,7 +1,7 @@
 """Tests for the requeue stuck entries background job."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from src.jobs.requeue_stuck_entries import requeue_stuck_entries, requeue_stuck_entries_loop
@@ -25,7 +25,7 @@ class MockPool:
 
 async def test_requeue_stuck_entries_requeues_stale_entry(db_conn, sample_queue_entry):
     """Stuck in_progress entries older than threshold are reset to pending."""
-    stale_reserved_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    stale_reserved_at = datetime.now(UTC) - timedelta(minutes=5)
     await db_conn.execute(
         """
         UPDATE queue_entries

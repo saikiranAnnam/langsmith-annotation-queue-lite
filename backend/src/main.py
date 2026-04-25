@@ -9,11 +9,12 @@ from src.database import close_pool, get_pool
 from src.jobs.requeue_stuck_entries import requeue_stuck_entries_loop
 from src.routers import feedback, projects, queues, rubrics, traces
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: initialize the connection pool
     pool = await get_pool()
-    
+
     # Event to signal the requeue task to stop
     stop_event = asyncio.Event()
     requeue_task = None
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
 
     try:
         yield
-    finally: 
+    finally:
         # Signal the requeue task to stop
         stop_event.set()
         if requeue_task is not None:

@@ -2,6 +2,7 @@
 
 from httpx import AsyncClient
 
+
 async def test_create_queue(client: AsyncClient):
     """Test creating a new queue."""
     response = await client.post("/queues", json={"name": "My Test Queue"})
@@ -180,6 +181,7 @@ async def test_get_next_entry_empty_queue(client: AsyncClient, sample_queue):
     assert response.status_code == 404
     assert response.json()["detail"] == "Queue is empty"
 
+
 async def test_get_next_entry_queue_not_found(client: AsyncClient):
     """Test getting next entry from non-existent queue."""
     fake_id = "00000000-0000-0000-0000-000000000000"
@@ -187,6 +189,7 @@ async def test_get_next_entry_queue_not_found(client: AsyncClient):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Queue not found"
+
 
 async def test_get_next_entry_sets_in_progress(client: AsyncClient, sample_queue_entry):
     """Test getting next entry sets the entry to reserved and mark it in_progress status."""
@@ -197,6 +200,7 @@ async def test_get_next_entry_sets_in_progress(client: AsyncClient, sample_queue
     assert data["status"] == "in_progress"
     assert data["reserved_at"] is not None
     assert data["reserved_by"] is not None
+
 
 async def test_get_next_entry_fifo_order(client: AsyncClient, sample_queue, db_conn, sample_project):
     """Test that entries are returned in FIFO order."""

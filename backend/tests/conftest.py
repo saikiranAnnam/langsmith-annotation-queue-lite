@@ -18,6 +18,7 @@ TEST_DB_PASSWORD = os.getenv("TEST_DB_PASSWORD", "postgres")
 TEST_DB_HOST = os.getenv("TEST_DB_HOST", "localhost")
 TEST_DB_PORT = os.getenv("TEST_DB_PORT", "5432")
 
+
 def pytest_configure(config):
     """Create test database and run migrations before any tests."""
     subprocess.run(
@@ -59,6 +60,7 @@ def pytest_configure(config):
 
     print("✓ Ran database migrations")
 
+
 def pytest_unconfigure(config):
     """Drop test database after all tests."""
     subprocess.run(
@@ -71,6 +73,7 @@ def pytest_unconfigure(config):
         capture_output=True,
     )
     print(f"\n✓ Dropped test database: {TEST_DB_NAME}")
+
 
 @pytest_asyncio.fixture
 async def db_conn() -> AsyncGenerator[asyncpg.Connection, None]:
@@ -94,6 +97,7 @@ async def db_conn() -> AsyncGenerator[asyncpg.Connection, None]:
                 await tr.rollback()
     finally:
         await pool.close()
+
 
 @pytest_asyncio.fixture
 async def client(db_conn) -> AsyncGenerator[AsyncClient, None]:

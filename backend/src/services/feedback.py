@@ -81,6 +81,7 @@ async def create_feedback_batch(
 
     return [_parse_row(row) for row in rows]
 
+
 async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | None:
     """Fetch a single feedback record by id, including any span selection metadata."""
     query, params = prepare_query(

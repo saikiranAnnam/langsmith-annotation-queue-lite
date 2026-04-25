@@ -1,8 +1,9 @@
 import asyncio
-import logging 
+import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 async def requeue_stuck_entries(pool, stale_after_seconds: int) -> int:
     """Reset in_progress queue entries whose reservation has exceeded the TTL back to pending."""
@@ -25,6 +26,7 @@ async def requeue_stuck_entries(pool, stale_after_seconds: int) -> int:
     logger.info(f"Requeued {count} stuck entries")
     return count
 
+
 async def requeue_stuck_entries_loop(
     pool,
     interval_seconds: int,
@@ -32,18 +34,16 @@ async def requeue_stuck_entries_loop(
     stop_event: asyncio.Event,
 ) -> None:
     """Periodically recover queue entries left in_progress when a reviewer's session crashes or times out."""
-    logger.info("Starting stuck-entry requeue loop: interval=%s, stale_after=%s", 
-        interval_seconds, 
-        stale_after_seconds)
+    logger.info("Starting stuck-entry requeue loop: interval=%s, stale_after=%s", interval_seconds, stale_after_seconds)
     while not stop_event.is_set():
         try:
             await requeue_stuck_entries(pool, stale_after_seconds)
         except Exception as e:
-            logger.error(f"Failed to requeue stuck queue entries: {e}")        
-        
+            logger.error(f"Failed to requeue stuck queue entries: {e}")
+
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     logger.info("Stopping stuck-entry requeue loop")
