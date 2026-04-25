@@ -5,7 +5,6 @@
 ## Table of Contents
 
 - [TL;DR](#tldr)
-- [Key Highlights](#key-highlights)
 - [Problem](#problem)
 - [What I Added vs Starter Code](#what-i-added-vs-the-starter-code)
 - [Architecture](#architecture)
@@ -17,7 +16,7 @@
   - [Span Highlighting](#span-highlighting)
   - [Feedback Upsert](#feedback-upsert)
   - [Reviewer UI](#reviewer-ui)
-- [Key Decisions](docs/decisions.md)
+- [Key Decisions](#key-decisions)
 - [Assumptions](#assumptions)
 - [Limitations](#limitations-and-things-id-improve-with-more-time)
 - [Extra Features](#extra-features-implemented)
@@ -27,21 +26,7 @@
 
 Built an annotation queue reviewer flow on top of the existing tracing backend. Multiple reviewers can work a queue concurrently without getting the same trace. Reviewers score traces against a rubric, can highlight spans within trace output JSON fields, and re-score rubric items after submitting. Crashed sessions recover automatically, traces don't stay locked forever in the queue.
 
----
-
-## Key Highlights
-
-A few things worth calling out in this implementation:
-
-- **Concurrency-safe queue processing** — uses Postgres row-level locking (`FOR UPDATE SKIP LOCKED`) to ensure multiple reviewers can work in parallel without conflicts, without needing external systems like Redis
-
-- **Automatic recovery of stuck sessions (extra feature)** — background TTL job requeues entries left `in_progress` after 30 minutes, preventing permanent lock-ups from crashed browsers without any manual intervention
-
-- **Structured evaluation via rubric system** — supports per-rubric-item scoring and comments, aligning with how LLM evaluation workflows are typically designed (score each rubric item independently, not the trace as a whole)
-
-- **Span-level feedback on trace JSON** — reviewers can select a highlighted span within a specific trace output field and attach that span selection to their feedback record, making feedback precise and traceable back to the exact model output
-
-- **Responsive reviewer experience** — optimistic UI updates show score changes immediately without waiting for the server, with automatic rollback on error; clear empty/error states so reviewers always know where they are in the queue
+Final UI Look : [final-output-UI](assets/final-output-UI.png)
 
 ---
 
@@ -85,9 +70,14 @@ The architecture is designed around three independent modules:
 
 [data-flow-diagram](assets/data-flow.png)
 
+### Detail Flow Sequence Diagram 
+
+[sequence-diagram](assets/sequence-flow.png)
+
 ### Component structure (frontend)
 
 [frontend-component](assets/frontend-component.png)
+
 
 ---
 
@@ -121,7 +111,7 @@ Two tables get new columns. Everything else is untouched (starter-code).
 3. Frontend receives the entry (with full trace data embedded) and renders it
 4. In parallel: `useFeedbackManager` calls `GET /traces/:id/feedback` to load existing feedback records — sidebar pre-fills rubric item scores if the queue entry was partially annotated before
 5. Reviewer scores rubric items. Each submit goes to `POST /feedback/batch` — the backend upserts on `(trace_id, key)` so create and update are the same call
-6. Reviewer clicks **Complete** → `POST /entries/:id/complete` deletes the entry → `useQueueSession` re-fetches and the next entry loads automatically
+6. Reviewer clicks **Complete** → `POST /entries/:id/complete` marks the entry as completed → `useQueueSession` re-fetches and the next entry loads automatically
 7. Reviewer clicks **Skip** → `POST /entries/:id/requeue` resets status to `pending` and updates `added_at` (pushes the entry to the back of the FIFO order) → next entry loads
 
 If the browser crashes mid-session, the entry stays locked until the TTL job resets it — see [TTL Recovery for Crashed Sessions](#ttl-recovery-for-crashed-sessions).
@@ -245,7 +235,7 @@ One rubric item is expanded at a time. When expanded, `RubricItemExpanded` shows
 
 Full rationale and alternatives considered in [docs/decisions.md](docs/decisions.md). 
 
-Short version:
+Shorter version:
 
 **Reservation — `FOR UPDATE SKIP LOCKED`**
 Three options evaluated: Redis lock, optimistic locking, database row lock. Chose the database lock — no external infrastructure, the lock lasts ~5ms (just the transaction duration), and Postgres handles the concurrency natively without retries or race conditions.
