@@ -181,3 +181,60 @@ async def test_feedback_cascade_delete_with_trace(client: AsyncClient, sample_tr
     # Verify feedback is also deleted
     response = await client.get(f"/feedback/{sample_feedback['id']}")
     assert response.status_code == 404
+
+
+async def test_create_feedback_batch_with_span(client: AsyncClient, sample_trace):
+    """Span fields survive a create → GET round-trip (serialization + deserialization of span_path JSONB)."""
+    span_path = ["outputs", "answer"]
+    response = await client.post(
+        "/feedback/batch",
+        json=[
+            {
+                "trace_id": str(sample_trace["id"]),
+                "key": "accuracy",
+                "score": 0.8,
+                "comment": "See highlighted text",
+                "span_path": span_path,
+                "span_start_index": 2,
+                "span_end_index": 7,
+            }
+        ],
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert len(data) == 1
+    fb = data[0]
+    assert fb["span_path"] == span_path
+    assert fb["span_start_index"] == 2
+    assert fb["span_end_index"] == 7
+
+    # Verify span fields come back correctly on a direct GET (tests _parse_row deserialization)
+    get_response = await client.get(f"/feedback/{fb['id']}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    assert fetched["span_path"] == span_path
+    assert fetched["span_start_index"] == 2
+    assert fetched["span_end_index"] == 7
+
+
+async def test_update_feedback_span_fields(client: AsyncClient, sample_feedback):
+    """Span fields can be added via PATCH and persist correctly."""
+    span_path = ["inputs", "question"]
+    response = await client.patch(
+        f"/feedback/{sample_feedback['id']}",
+        json={
+            "span_path": span_path,
+            "span_start_index": 0,
+            "span_end_index": 4,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["span_path"] == span_path
+    assert data["span_start_index"] == 0
+    assert data["span_end_index"] == 4
+    # Original fields untouched
+    assert data["score"] == sample_feedback["score"]
+    assert data["comment"] == sample_feedback["comment"]

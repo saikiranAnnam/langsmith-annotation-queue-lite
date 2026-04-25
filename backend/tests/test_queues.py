@@ -1,6 +1,17 @@
 """Tests for queues endpoints."""
 
+import asyncio
+import os
+
+import asyncpg
+import orjson
 from httpx import AsyncClient
+
+_TEST_DB_HOST = os.getenv("TEST_DB_HOST", "localhost")
+_TEST_DB_PORT = int(os.getenv("TEST_DB_PORT", "5432"))
+_TEST_DB_USER = os.getenv("TEST_DB_USER", "postgres")
+_TEST_DB_PASSWORD = os.getenv("TEST_DB_PASSWORD", "postgres")
+_TEST_DB_NAME = "langsmith_test"
 
 
 async def test_create_queue(client: AsyncClient):
@@ -325,3 +336,87 @@ async def test_requeue_entry_queue_not_found(client: AsyncClient, sample_queue_e
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Queue not found"
+
+
+async def test_concurrent_reservation_no_duplicate():
+    """Two reviewers calling get_next_entry simultaneously each get a different entry.
+
+    This test bypasses the transaction-rollback fixture because FOR UPDATE SKIP LOCKED
+    only prevents duplicate reservations across separate connections — it can't be
+    demonstrated within a single connection's transaction. The test creates its own
+    pool, commits real rows, runs concurrent reservations, and cleans up afterwards.
+    """
+    from datetime import datetime
+
+    from src.services.queues import get_next_entry
+
+    pool = await asyncpg.create_pool(
+        host=_TEST_DB_HOST,
+        port=_TEST_DB_PORT,
+        user=_TEST_DB_USER,
+        password=_TEST_DB_PASSWORD,
+        database=_TEST_DB_NAME,
+        min_size=2,
+        max_size=5,
+    )
+
+    project_id = None
+    queue_id = None
+    try:
+        async with pool.acquire() as conn:
+            proj = await conn.fetchrow(
+                "INSERT INTO tracing_projects (name) VALUES ($1) RETURNING id",
+                "concurrent-reservation-test",
+            )
+            project_id = proj["id"]
+
+            t1 = await conn.fetchrow(
+                "INSERT INTO traces (project_id, inputs, outputs, start_time) VALUES ($1, $2, $3, $4) RETURNING id",
+                project_id,
+                orjson.dumps({"q": "first"}).decode(),
+                orjson.dumps({"a": "first"}).decode(),
+                datetime.now(),
+            )
+            t2 = await conn.fetchrow(
+                "INSERT INTO traces (project_id, inputs, outputs, start_time) VALUES ($1, $2, $3, $4) RETURNING id",
+                project_id,
+                orjson.dumps({"q": "second"}).decode(),
+                orjson.dumps({"a": "second"}).decode(),
+                datetime.now(),
+            )
+
+            q = await conn.fetchrow(
+                "INSERT INTO queues (name) VALUES ($1) RETURNING id",
+                "concurrent-reservation-test-queue",
+            )
+            queue_id = q["id"]
+
+            await conn.executemany(
+                "INSERT INTO queue_entries (queue_id, trace_id, status) VALUES ($1, $2, 'pending')",
+                [(queue_id, t1["id"]), (queue_id, t2["id"])],
+            )
+
+        async def reserve(reviewer_id: str):
+            async with pool.acquire() as conn:
+                return await get_next_entry(conn, queue_id, reviewer_id)
+
+        entry_a, entry_b = await asyncio.gather(
+            reserve("reviewer-a"),
+            reserve("reviewer-b"),
+        )
+
+        # Both reviewers got an entry and each got a different one.
+        assert entry_a is not None and entry_a is not False
+        assert entry_b is not None and entry_b is not False
+        assert entry_a["id"] != entry_b["id"], "FOR UPDATE SKIP LOCKED must give each reviewer a distinct entry"
+        assert entry_a["status"] == "in_progress"
+        assert entry_b["status"] == "in_progress"
+
+    finally:
+        async with pool.acquire() as conn:
+            if queue_id:
+                await conn.execute("DELETE FROM queues WHERE id = $1", queue_id)
+            if project_id:
+                # Cascades to traces → queue_entries
+                await conn.execute("DELETE FROM tracing_projects WHERE id = $1", project_id)
+        await pool.close()
