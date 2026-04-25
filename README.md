@@ -12,6 +12,14 @@ This is a comprehensive tracing and annotation system that allows you to:
 - **Define rubrics** - Specify evaluation criteria for queue items
 - **Process queues FIFO-style** - Pop traces from queues for review and mark them complete
 
+## For code reviewers
+
+This repo implements the annotation queue reviewer flow on top of the provided tracing backend. The core problem is concurrent reservation — multiple reviewers hitting "get next entry" simultaneously must never receive the same trace. 
+
+Full design : [SOLUTION.md](SOLUTION.md)  
+Architectural decisions: [docs/decisions.md](docs/decisions.md) 
+Challenges: [docs/challenges.md](docs/challenges.md) 
+
 ## Getting Started
 
 ### Prerequisites
@@ -87,7 +95,8 @@ The frontend will be available at http://localhost:5173 (Vite default port)
 
 ### Feedback
 - `POST /feedback/batch` - Create multiple feedback items at once
-- `PATCH /feedback/{feedback_id}` - Update feedback
+- `GET /feedback/{feedback_id}` - Get a specific feedback item
+- `PATCH /feedback/{feedback_id}` - Update feedback (partial update)
 - `DELETE /feedback/{feedback_id}` - Delete feedback
 
 ### Projects & Traces

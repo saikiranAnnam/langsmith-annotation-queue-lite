@@ -12,7 +12,7 @@ I evaluated three approaches:
 Use Redis to set a lock before updating the database. The problem: if the server crashes mid-operation, the lock stays stuck and no one can claim that entry until it expires or is manually cleared. It also adds infrastructure that isn't needed for anything else.
 
 **2. Optimistic Locking (version tracking)**
-Each row has a version number. If two requests read the same version and both try to update, the second one fails and retries. Safe, but under any meaningful reviewer load, you get a lot of retries — requests constantly bumping into each other, which adds latency and wasted DB round trips.
+Each row has a version number. If two requests read the same version and both try to update, the second one fails and retries. Safe, but under any meaningful reviewer load, you get a lot of retries — requests frequently conflicting under concurrent load, which adds latency and wasted DB round trips.
 
 **3. Database Row-Level Locking (`FOR UPDATE SKIP LOCKED`)**
 The database finds the first available `pending` row and locks it for the duration of the transaction. Any concurrent request that tries to pick the same row sees the lock and skips to the next `pending` one instead. No retries, no external tools. The lock is held for ~5ms — just long enough to update the status — then released.
