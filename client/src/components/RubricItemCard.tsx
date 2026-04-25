@@ -1,5 +1,6 @@
 import { CircleCheckBig, ChevronDown, ChevronRight } from "lucide-react";
 import { RubricItemExpanded } from "./RubricItemExpanded";
+import type { RubricItemExpandedHandle } from "./RubricItemExpanded";
 import type { Feedback, FeedbackSpan, QueueRubricItem } from "../types";
 import { getRubricColor } from "../lib/rubricColors";
 
@@ -19,9 +20,10 @@ type Props = {
   pendingText?: string | null;
   overlapWarning?: boolean;
   onClearSpan?: () => void;
+  expandedRef?: React.Ref<RubricItemExpandedHandle>;
 };
 
-export function RubricItemCard({ item, feedback, isOpen, onToggle, onSubmit, isFeedbackLoading, pendingSpan, pendingText, overlapWarning, onClearSpan }: Props) {
+export function RubricItemCard({ item, feedback, isOpen, onToggle, onSubmit, isFeedbackLoading, pendingSpan, pendingText, overlapWarning, onClearSpan, expandedRef }: Props) {
   const colors = getRubricColor(item.feedback_key);
   const isCompleted = feedback?.score != null;
 
@@ -80,6 +82,7 @@ export function RubricItemCard({ item, feedback, isOpen, onToggle, onSubmit, isF
       {isOpen && (
         <div className="px-4 pb-4">
           <RubricItemExpanded
+            ref={expandedRef}
             item={item}
             existing={feedback}
             onSubmit={onSubmit}

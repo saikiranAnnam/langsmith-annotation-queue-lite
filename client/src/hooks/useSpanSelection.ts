@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { Feedback, FeedbackSpan } from "../types";
 
 export function useSpanSelection(highlights: Feedback[] = []) {
   const [pendingSpan, setPendingSpan] = useState<FeedbackSpan | null>(null);
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [overlapWarning, setOverlapWarning] = useState(false);
+  const [crossFieldWarning, setCrossFieldWarning] = useState(false);
+  const crossFieldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMouseUp = (_e: React.MouseEvent) => {
     try {
@@ -30,12 +32,16 @@ export function useSpanSelection(highlights: Feedback[] = []) {
           : (ancestor as Text).parentElement?.closest("[data-path]");
 
       if (!el) {
-        // Span crosses a JSON field boundary — offsets would be ambiguous, reject silently.
+        // Span crosses a JSON field boundary — show inline guidance, auto-clear after 3s.
         setPendingSpan(null);
         setPendingText(null);
         setOverlapWarning(false);
+        setCrossFieldWarning(true);
+        if (crossFieldTimer.current) clearTimeout(crossFieldTimer.current);
+        crossFieldTimer.current = setTimeout(() => setCrossFieldWarning(false), 3000);
         return;
       }
+      setCrossFieldWarning(false);
 
       // Measure how many characters come before the selection start within this field.
       // Cloning the range and trimming it to [fieldStart, selectionStart] then calling
@@ -81,7 +87,8 @@ export function useSpanSelection(highlights: Feedback[] = []) {
     setPendingSpan(null);
     setPendingText(null);
     setOverlapWarning(false);
+    setCrossFieldWarning(false);
   };
 
-  return { pendingSpan, pendingText, overlapWarning, clearSpan, handleMouseUp };
+  return { pendingSpan, pendingText, overlapWarning, crossFieldWarning, clearSpan, handleMouseUp };
 }
