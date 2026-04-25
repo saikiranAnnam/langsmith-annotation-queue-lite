@@ -1,7 +1,7 @@
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src import schemas
 from src.database import get_connection
@@ -88,9 +88,10 @@ async def populate_queue(
 async def get_next_entry(
     queue_id: UUID,
     conn: asyncpg.Connection = Depends(get_connection),
+    reviewer_id: str = Query(default="anonymous"),
 ) -> dict:
     """Get the next pending entry from the queue."""
-    result = await queues_service.get_next_entry(conn, queue_id)
+    result = await queues_service.get_next_entry(conn, queue_id, reviewer_id)
 
     if result is False:
         raise HTTPException(status_code=404, detail="Queue not found")
@@ -116,7 +117,7 @@ async def complete_entry(
         elif message == "entry_not_found":
             raise HTTPException(status_code=404, detail="Queue entry not found")
 
-    return {"message": "Entry completed and removed from queue"}
+    return {"message": "Entry completed"}
 
 
 @router.post("/{queue_id}/entries/{entry_id}/requeue", status_code=status.HTTP_200_OK)

@@ -21,6 +21,7 @@ export type Queue = {
   created_at: string;
   modified_at: string;
   pending_count: number;
+  total_count: number;
 };
 
 export type QueueEntry = {

@@ -1,12 +1,14 @@
 import useSWR from "swr";
 import useSWRMutation from "swr/mutation";
 import { API_BASE, fetcher, postData } from "../lib/api";
+import { getReviewerId } from "../lib/reviewerId";
 import type { QueueEntry } from "../types";
 
 export function useQueueSession(queueId: string) {
   // Fetching this URL also reserves the queue entry on the backend (sets it to in_progress).
   // Two reviewers hitting this concurrently get different entries via FOR UPDATE SKIP LOCKED.
-  const swrKey = `${API_BASE}/queues/${queueId}/entries/next`;
+  // reviewer_id ensures a refresh returns the same entry rather than reserving a new one.
+  const swrKey = `${API_BASE}/queues/${queueId}/entries/next?reviewer_id=${getReviewerId()}`;
 
   const { data: entry, isLoading, error: loadError, mutate } = useSWR<QueueEntry | null>(
     swrKey,
@@ -51,6 +53,8 @@ export function useQueueSession(queueId: string) {
     mutate(undefined, { revalidate: true });
   };
 
+  const refresh = () => mutate(undefined, { revalidate: true });
+
   return {
     entry: entry ?? null,
     isLoading,
@@ -59,5 +63,6 @@ export function useQueueSession(queueId: string) {
     isError: !!loadError,
     completeEntry,
     skipEntry,
+    refresh,
   };
 }

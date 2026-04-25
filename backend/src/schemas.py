@@ -62,6 +62,7 @@ class Queue(QueueBase):
     created_at: datetime
     modified_at: datetime
     pending_count: int
+    total_count: int
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -265,9 +265,9 @@ async def test_complete_entry(client: AsyncClient, sample_queue, sample_queue_en
 
     assert response.status_code == 200
     data = response.json()
-    assert "completed and removed" in data["message"]
+    assert "completed" in data["message"]
 
-    # Verify entry is deleted
+    # Verify no pending entries remain (completed entry is not re-served)
     response = await client.get(f"/queues/{sample_queue['id']}/entries/next")
     assert response.status_code == 404
 
