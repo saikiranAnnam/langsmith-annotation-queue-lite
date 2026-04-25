@@ -1,4 +1,4 @@
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import useSWRMutation from "swr/mutation";
 import { API_BASE, fetcher, postData } from "../lib/api";
 import { getReviewerId } from "../lib/reviewerId";
@@ -42,8 +42,10 @@ export function useQueueSession(queueId: string) {
   const completeEntry = async () => {
     if (!entry) return;
     await triggerComplete({ queueId, entryId: entry.id });
-    // Clear the cache and re-fetch — this automatically reserves the next pending entry
+    // Clear the cache and re-fetch — this automatically reserves the next pending entry.
+    // Also invalidate the queue detail so pending_count updates without a page refresh.
     mutate(undefined, { revalidate: true });
+    globalMutate(`${API_BASE}/queues/${queueId}`);
   };
 
   const skipEntry = async () => {
@@ -51,6 +53,7 @@ export function useQueueSession(queueId: string) {
     // Requeue puts this entry back to pending so another reviewer can pick it up
     await triggerRequeue({ queueId, entryId: entry.id });
     mutate(undefined, { revalidate: true });
+    globalMutate(`${API_BASE}/queues/${queueId}`);
   };
 
   const refresh = () => mutate(undefined, { revalidate: true });

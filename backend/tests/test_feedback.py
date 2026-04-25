@@ -218,6 +218,33 @@ async def test_create_feedback_batch_with_span(client: AsyncClient, sample_trace
     assert fetched["span_end_index"] == 7
 
 
+async def test_create_feedback_batch_upsert_conflict(client: AsyncClient, sample_trace):
+    """Submitting feedback for the same (trace_id, key) twice upserts — one row, updated values."""
+    payload = [{"trace_id": str(sample_trace["id"]), "key": "accuracy", "score": 0.5, "comment": "first"}]
+
+    first = await client.post("/feedback/batch", json=payload)
+    assert first.status_code == 201
+    first_id = first.json()[0]["id"]
+
+    # Second submit: same trace_id + key, different score and comment
+    payload[0]["score"] = 0.9
+    payload[0]["comment"] = "second"
+    second = await client.post("/feedback/batch", json=payload)
+    assert second.status_code == 201
+    second_data = second.json()
+
+    # Must be the same row (same id), not a new one
+    assert second_data[0]["id"] == first_id
+    assert second_data[0]["score"] == 0.9
+    assert second_data[0]["comment"] == "second"
+
+    # Verify only one row exists for this trace + key
+    all_feedback = await client.get(f"/traces/{sample_trace['id']}/feedback")
+    assert all_feedback.status_code == 200
+    accuracy_rows = [f for f in all_feedback.json() if f["key"] == "accuracy"]
+    assert len(accuracy_rows) == 1
+
+
 async def test_update_feedback_span_fields(client: AsyncClient, sample_feedback):
     """Span fields can be added via PATCH and persist correctly."""
     span_path = ["inputs", "question"]

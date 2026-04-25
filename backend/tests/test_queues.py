@@ -338,6 +338,39 @@ async def test_requeue_entry_queue_not_found(client: AsyncClient, sample_queue_e
     assert response.json()["detail"] == "Queue not found"
 
 
+async def test_get_next_entry_excludes_in_progress(client: AsyncClient, sample_queue, sample_queue_entry):
+    """An in_progress entry is not returned to a different reviewer as the next entry."""
+    # Reserve the only entry as reviewer-A
+    response = await client.get(
+        f"/queues/{sample_queue['id']}/entries/next?reviewer_id=reviewer-a"
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "in_progress"
+
+    # A different reviewer should see an empty queue — the in_progress entry must be excluded
+    response = await client.get(
+        f"/queues/{sample_queue['id']}/entries/next?reviewer_id=reviewer-b"
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Queue is empty"
+
+
+async def test_get_next_entry_idempotent_for_same_reviewer(client: AsyncClient, sample_queue, sample_queue_entry):
+    """Calling get_next_entry twice with the same reviewer_id returns the same entry both times."""
+    first = await client.get(
+        f"/queues/{sample_queue['id']}/entries/next?reviewer_id=reviewer-a"
+    )
+    assert first.status_code == 200
+    first_entry_id = first.json()["id"]
+
+    # Second call — same reviewer, same queue
+    second = await client.get(
+        f"/queues/{sample_queue['id']}/entries/next?reviewer_id=reviewer-a"
+    )
+    assert second.status_code == 200
+    assert second.json()["id"] == first_entry_id
+
+
 async def test_concurrent_reservation_no_duplicate():
     """Two reviewers calling get_next_entry simultaneously each get a different entry.
 
