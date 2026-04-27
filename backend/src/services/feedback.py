@@ -1,5 +1,6 @@
 """Business logic for feedback."""
 
+import json
 from uuid import UUID
 
 import asyncpg
@@ -8,11 +9,19 @@ from src import schemas
 from src.sql_utils import prepare_query
 
 
+def _parse_row(row: asyncpg.Record) -> dict:
+    """Convert an asyncpg row to a dict, deserializing span_path from its JSON string."""
+    d = dict(row)
+    if isinstance(d.get("span_path"), str):
+        d["span_path"] = json.loads(d["span_path"])
+    return d
+
+
 async def create_feedback_batch(
     conn: asyncpg.Connection,
     feedback_batch: list[schemas.FeedbackCreate],
 ) -> list[dict]:
-    """Create multiple feedback items at once."""
+    """Upsert a batch of feedback records — first submit creates, re-score updates. Idempotent on (trace_id, key)."""
     if not feedback_batch:
         return None  # Signal empty batch error
 
@@ -31,7 +40,7 @@ async def create_feedback_batch(
     if missing_trace_ids:
         return None, missing_trace_ids  # Signal missing traces
 
-    # Prepare batch insert data
+    # Build insert tuples — span fields are optional, None when not provided
     insert_values = []
     for feedback in feedback_batch:
         insert_values.append(
@@ -40,25 +49,53 @@ async def create_feedback_batch(
                 feedback.key,
                 feedback.score,
                 feedback.comment,
+                json.dumps(feedback.span_path) if feedback.span_path else None,
+                feedback.span_start_index,
+                feedback.span_end_index,
             )
         )
 
-    # Insert all feedback items in batch
+    # Upsert — ON CONFLICT updates the existing row so duplicate (trace_id, key)
+    # pairs are never created, regardless of what client is calling this endpoint.
     rows = await conn.fetch(
         """
-        INSERT INTO feedback (trace_id, key, score, comment)
-        SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::float[], $4::text[])
-        RETURNING id, trace_id, key, score, comment, created_at, modified_at
+        INSERT INTO feedback (trace_id, key, score, comment, span_path, span_start_index, span_end_index)
+        SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::float[], $4::text[], $5::jsonb[], $6::int[], $7::int[])
+        ON CONFLICT (trace_id, key) DO UPDATE SET
+            score             = EXCLUDED.score,
+            comment           = EXCLUDED.comment,
+            span_path         = EXCLUDED.span_path,
+            span_start_index  = EXCLUDED.span_start_index,
+            span_end_index    = EXCLUDED.span_end_index,
+            modified_at       = NOW()
+        RETURNING id, trace_id, key, score, comment, span_path, span_start_index, span_end_index, created_at, modified_at
         """,
         [v[0] for v in insert_values],  # trace_ids
         [v[1] for v in insert_values],  # keys
         [v[2] for v in insert_values],  # scores
         [v[3] for v in insert_values],  # comments
+        [v[4] for v in insert_values],  # span_paths
+        [v[5] for v in insert_values],  # span_start_indices
+        [v[6] for v in insert_values],  # span_end_indices
     )
 
-    # Process results
-    results = [dict(row) for row in rows]
-    return results
+    return [_parse_row(row) for row in rows]
+
+
+async def get_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> dict | None:
+    """Fetch a single feedback record by id, including any span selection metadata."""
+    query, params = prepare_query(
+        """
+        SELECT id, trace_id, key, score, comment,
+               span_path, span_start_index, span_end_index,
+               created_at, modified_at
+        FROM feedback
+        WHERE id = $feedback_id
+        """,
+        feedback_id=feedback_id,
+    )
+    row = await conn.fetchrow(query, *params)
+    return _parse_row(row) if row else None
 
 
 async def update_feedback(
@@ -66,8 +103,7 @@ async def update_feedback(
     feedback_id: UUID,
     feedback_update: schemas.FeedbackUpdate,
 ) -> dict | None:
-    """Update a feedback item."""
-    # Build dynamic update query with named params
+    """Partially update a feedback record. Only provided fields are written."""
     updates = {}
 
     if feedback_update.score is not None:
@@ -76,23 +112,31 @@ async def update_feedback(
     if feedback_update.comment is not None:
         updates["comment"] = feedback_update.comment
 
+    if feedback_update.span_path is not None:
+        # asyncpg expects jsonb as a serialized string for named-param queries
+        updates["span_path"] = json.dumps(feedback_update.span_path)
+
+    if feedback_update.span_start_index is not None:
+        updates["span_start_index"] = feedback_update.span_start_index
+
+    if feedback_update.span_end_index is not None:
+        updates["span_end_index"] = feedback_update.span_end_index
+
     if not updates:
         return None  # Signal no fields to update
 
-    # Build SET clause with named parameters
-    set_clauses = []
-    for field in updates.keys():
-        set_clauses.append(f"{field} = ${field}")
+    set_clauses = [f"{field} = ${field}" for field in updates.keys()]
     set_clauses.append("modified_at = NOW()")
 
     query_str = f"""
         UPDATE feedback
         SET {", ".join(set_clauses)}
         WHERE id = $feedback_id
-        RETURNING id, trace_id, key, score, comment, created_at, modified_at
+        RETURNING id, trace_id, key, score, comment,
+                  span_path, span_start_index, span_end_index,
+                  created_at, modified_at
     """
 
-    # Remove modified_at from params since we handle it with NOW()
     params_dict = dict(updates)
     params_dict["feedback_id"] = feedback_id
 
@@ -101,12 +145,11 @@ async def update_feedback(
     if not row:
         return False  # Signal not found
 
-    result = dict(row)
-    return result
+    return _parse_row(row)
 
 
 async def delete_feedback(conn: asyncpg.Connection, feedback_id: UUID) -> bool:
-    """Delete a feedback item. Returns True if deleted, False if not found."""
+    """Delete a feedback record. Returns True if deleted, False if not found."""
     query, params = prepare_query(
         """
         DELETE FROM feedback

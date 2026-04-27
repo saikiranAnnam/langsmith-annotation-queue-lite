@@ -1,7 +1,7 @@
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src import schemas
 from src.database import get_connection
@@ -88,25 +88,26 @@ async def populate_queue(
 async def get_next_entry(
     queue_id: UUID,
     conn: asyncpg.Connection = Depends(get_connection),
+    reviewer_id: str = Query(default="anonymous"),
 ) -> dict:
     """Get the next pending entry from the queue."""
-    result = await queues_service.get_next_entry(conn, queue_id)
+    result = await queues_service.get_next_entry(conn, queue_id, reviewer_id)
 
     if result is False:
         raise HTTPException(status_code=404, detail="Queue not found")
 
     if result is None:
-        raise HTTPException(status_code=404, detail="No pending entries in queue")
+        raise HTTPException(status_code=404, detail="Queue is empty")
 
     return result
 
 
-@router.post("/{queue_id}/entries/{entry_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{queue_id}/entries/{entry_id}/complete", status_code=status.HTTP_200_OK)
 async def complete_entry(
     queue_id: UUID,
     entry_id: UUID,
     conn: asyncpg.Connection = Depends(get_connection),
-) -> None:
+) -> dict:
     """Mark an entry as complete and remove it from the queue."""
     success, message = await queues_service.complete_entry(conn, queue_id, entry_id)
 
@@ -115,6 +116,8 @@ async def complete_entry(
             raise HTTPException(status_code=404, detail="Queue not found")
         elif message == "entry_not_found":
             raise HTTPException(status_code=404, detail="Queue entry not found")
+
+    return {"message": "Entry completed"}
 
 
 @router.post("/{queue_id}/entries/{entry_id}/requeue", status_code=status.HTTP_200_OK)
@@ -132,4 +135,4 @@ async def requeue_entry(
         elif message == "entry_not_found":
             raise HTTPException(status_code=404, detail="Queue entry not found")
 
-    return {"message": "Entry re-queued successfully"}
+    return {"message": "Entry requeued successfully"}

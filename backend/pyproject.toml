@@ -35,7 +35,7 @@ packages = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 # Automatically mark all async tests with asyncio marker
 markers = [
     "asyncio: mark test as an asyncio test"

@@ -1,0 +1,63 @@
+import { useState, useEffect } from "react";
+import { useTraceFeedback } from "./useApi";
+import { API_BASE, postData } from "../lib/api";
+import type { Feedback, FeedbackSpan } from "../types";
+
+export function useFeedbackManager(traceId: string | null) {
+  const { feedback: existing, isLoading: isFeedbackLoading } = useTraceFeedback(traceId);
+
+  // Local map of rubric key → feedback record so individual rubric items
+  // can be updated optimistically without re-fetching the full trace feedback.
+  const [feedbackMap, setFeedbackMap] = useState<Map<string, Feedback>>(new Map());
+
+  // When the trace changes, rebuild the map from server data
+  useEffect(() => {
+    const map = new Map<string, Feedback>();
+    existing.forEach((f) => map.set(f.key, f));
+    setFeedbackMap(map);
+  // Depend on length, not the array reference — rebuilds when entries are added
+  // or removed, not on every re-render where the array identity changes.
+  }, [traceId, existing.length]);
+
+  const submitFeedback = async (
+    key: string,
+    score: number | null,
+    comment: string,
+    span?: FeedbackSpan
+  ) => {
+    const prior = feedbackMap.get(key);
+
+    // Show the change immediately — don't wait for the server
+    const optimistic = {
+      ...(prior ?? {}),
+      key,
+      score,
+      comment,
+      span_path: span?.span_path,
+      span_start_index: span?.span_start_index,
+      span_end_index: span?.span_end_index,
+    } as Feedback;
+    setFeedbackMap((prev) => new Map(prev).set(key, optimistic));
+
+    try {
+      // Always POST — the backend upserts on (trace_id, key) so create and
+      // update are the same call. No need to track whether feedback exists.
+      const batch = await postData<Feedback[]>(`${API_BASE}/feedback/batch`, [
+        { trace_id: traceId, key, score, comment, ...(span ?? {}) },
+      ]);
+      const saved = batch[0];
+
+      setFeedbackMap((prev) => new Map(prev).set(key, saved));
+    } catch (err) {
+      // Server rejected it — roll back to what was there before
+      setFeedbackMap((prev) => {
+        const next = new Map(prev);
+        prior ? next.set(key, prior) : next.delete(key);
+        return next;
+      });
+      throw err;
+    }
+  };
+
+  return { feedbackMap, isFeedbackLoading, submitFeedback };
+}

@@ -52,6 +52,30 @@ export async function postData<T>(url: string, data: unknown): Promise<T> {
   return res.json();
 }
 
+export async function patchData<T>(url: string, data: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const error = new Error("An error occurred while patching the data.");
+    console.error(`API Error patching ${url}:`, res.status, res.statusText);
+    try {
+      // @ts-expect-error
+      error.info = await res.json();
+    } catch (e) {
+      // @ts-expect-error
+      error.info = { message: res.statusText };
+    }
+    // @ts-expect-error 
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
 export async function deleteData(url: string) {
   const res = await fetch(url, {
     method: "DELETE",

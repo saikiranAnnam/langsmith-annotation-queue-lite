@@ -11,6 +11,7 @@ import { AnnotationQueuePage } from "./pages/AnnotationQueuePage";
 import { ProjectDetailsPage } from "./pages/ProjectDetailsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { QueuesPage } from "./pages/QueuesPage";
+import { Toaster } from "sonner";
 
 function Layout() {
   return (
@@ -62,6 +63,7 @@ function Layout() {
 function App() {
   return (
     <BrowserRouter>
+      <Toaster position="bottom-right" richColors />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<ProjectsPage />} />{" "}

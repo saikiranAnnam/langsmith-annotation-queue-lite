@@ -19,7 +19,10 @@ async def create_queue(conn: asyncpg.Connection, name: str) -> dict:
         name=name,
     )
     row = await conn.fetchrow(query, *params)
-    return dict(row)
+    result = dict(row)
+    result["pending_count"] = 0
+    result["total_count"] = 0
+    return result
 
 
 async def list_queues(conn: asyncpg.Connection) -> list[dict]:
@@ -27,7 +30,8 @@ async def list_queues(conn: asyncpg.Connection) -> list[dict]:
     rows = await conn.fetch(
         """
         SELECT q.id, q.name, q.created_at, q.modified_at,
-               COUNT(qe.id) FILTER (WHERE qe.status = 'pending') AS pending_count
+               COUNT(qe.id) FILTER (WHERE qe.status IN ('pending', 'in_progress')) AS pending_count,
+               COUNT(qe.id) AS total_count
         FROM queues q
         LEFT JOIN queue_entries qe ON qe.queue_id = q.id
         GROUP BY q.id, q.name, q.created_at, q.modified_at
@@ -42,7 +46,8 @@ async def get_queue(conn: asyncpg.Connection, queue_id: UUID) -> dict | None:
     query, params = prepare_query(
         """
         SELECT q.id, q.name, q.created_at, q.modified_at,
-               COUNT(qe.id) FILTER (WHERE qe.status = 'pending') AS pending_count
+               COUNT(qe.id) FILTER (WHERE qe.status IN ('pending', 'in_progress')) AS pending_count,
+               COUNT(qe.id) AS total_count
         FROM queues q
         LEFT JOIN queue_entries qe ON qe.queue_id = q.id
         WHERE q.id = $queue_id
@@ -55,7 +60,7 @@ async def get_queue(conn: asyncpg.Connection, queue_id: UUID) -> dict | None:
 
 
 async def update_queue(conn: asyncpg.Connection, queue_id: UUID, name: str | None) -> dict | None:
-    """Update a queue."""
+    """Update queue metadata. Returns None if no fields provided, False if not found."""
     if name is None:
         return None  # Signal no fields to update
 
@@ -64,7 +69,11 @@ async def update_queue(conn: asyncpg.Connection, queue_id: UUID, name: str | Non
         UPDATE queues
         SET name = $name, modified_at = NOW()
         WHERE id = $queue_id
-        RETURNING id, name, created_at, modified_at
+        RETURNING id, name, created_at, modified_at,
+                  (SELECT COUNT(*) FROM queue_entries
+                   WHERE queue_id = $queue_id AND status IN ('pending', 'in_progress')) AS pending_count,
+                  (SELECT COUNT(*) FROM queue_entries
+                   WHERE queue_id = $queue_id) AS total_count
         """,
         name=name,
         queue_id=queue_id,
@@ -96,7 +105,6 @@ async def populate_queue(
     - (False, None) if queue not found
     - (False, [missing_ids]) if some traces not found
     """
-    # Verify queue exists
     query, params = prepare_query(
         "SELECT EXISTS(SELECT 1 FROM queues WHERE id = $queue_id)",
         queue_id=queue_id,
@@ -105,7 +113,6 @@ async def populate_queue(
     if not exists:
         return False, None
 
-    # Verify all traces exist
     query, params = prepare_query(
         "SELECT id FROM traces WHERE id = ANY($trace_ids::uuid[])",
         trace_ids=trace_ids,
@@ -117,7 +124,6 @@ async def populate_queue(
     if missing_trace_ids:
         return False, missing_trace_ids
 
-    # Insert queue entries in batch using executemany
     await conn.executemany(
         """
         INSERT INTO queue_entries (queue_id, trace_id, status)
@@ -129,12 +135,18 @@ async def populate_queue(
     return True, None
 
 
-async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | None:
+async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID, user_id: str = "anonymous") -> dict | None:
     """
-    Get the next pending entry from a queue.
-    Returns None if queue is empty or queue doesn't exist.
+    Atomically reserve the next pending queue entry for a reviewer.
+
+    Selects and locks the oldest pending row with FOR UPDATE SKIP LOCKED,
+    so concurrent reviewers never receive the same trace. The reservation
+    (status=in_progress, reserved_at, reserved_by) is committed before
+    the lock is released.
+
+    Returns None if no pending entries remain, False if the queue doesn't exist.
+    user_id is the reviewer id; defaults to "anonymous" until auth is wired in.
     """
-    # Verify queue exists
     query, params = prepare_query(
         "SELECT EXISTS(SELECT 1 FROM queues WHERE id = $queue_id)",
         queue_id=queue_id,
@@ -143,26 +155,72 @@ async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | Non
     if not exists:
         return False  # Signal queue not found
 
-    # Get the next pending entry
+    # If this reviewer already has an in_progress entry, return it — this makes
+    # GET /entries/next idempotent so a page refresh doesn't burn a new entry.
+    query, params = prepare_query(
+        """
+        SELECT id FROM queue_entries
+        WHERE queue_id = $queue_id
+          AND status = 'in_progress'
+          AND reserved_by = $user_id
+        LIMIT 1
+        """,
+        queue_id=queue_id,
+        user_id=user_id,
+    )
+    existing = await conn.fetchrow(query, *params)
+
+    if existing:
+        entry_id = existing["id"]
+    else:
+        async with conn.transaction():
+            query, params = prepare_query(
+                """
+                SELECT id
+                FROM queue_entries
+                WHERE queue_id = $queue_id AND status = 'pending'
+                ORDER BY added_at
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                """,
+                queue_id=queue_id,
+            )
+            locked_row = await conn.fetchrow(query, *params)
+
+            if not locked_row:
+                return None
+
+            query, params = prepare_query(
+                """
+                UPDATE queue_entries
+                SET status      = 'in_progress',
+                    reserved_at = NOW(),
+                    reserved_by = $user_id
+                WHERE id = $entry_id
+                """,
+                user_id=user_id,
+                entry_id=locked_row["id"],
+            )
+            await conn.execute(query, *params)
+            entry_id = locked_row["id"]
+
+    # Fetch the reserved entry with its trace data after the transaction.
+    # The row lock only needs to cover the status update — no reason to hold
+    # it across the heavier join query.
     query, params = prepare_query(
         """
         SELECT qe.id, qe.trace_id, qe.queue_id, qe.status, qe.added_at,
+               qe.reserved_at, qe.reserved_by,
                t.id as trace_id, t.project_id, t.inputs, t.outputs,
                t.trace_metadata, t.start_time, t.end_time
         FROM queue_entries qe
         JOIN traces t ON t.id = qe.trace_id
-        WHERE qe.queue_id = $queue_id AND qe.status = 'pending'
-        ORDER BY qe.added_at
-        LIMIT 1
+        WHERE qe.id = $entry_id
         """,
-        queue_id=queue_id,
+        entry_id=entry_id,
     )
     row = await conn.fetchrow(query, *params)
 
-    if not row:
-        return None  # Signal empty queue
-
-    # Build result with trace data
     result = dict(row)
     trace_data = {
         "id": result["trace_id"],
@@ -174,7 +232,6 @@ async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | Non
         "end_time": result["end_time"],
     }
 
-    # Convert JSON strings to dicts
     for field in ["inputs", "outputs", "trace_metadata"]:
         if trace_data[field] and isinstance(trace_data[field], str):
             trace_data[field] = orjson.loads(trace_data[field])
@@ -185,6 +242,8 @@ async def get_next_entry(conn: asyncpg.Connection, queue_id: UUID) -> dict | Non
         "queue_id": result["queue_id"],
         "status": result["status"],
         "added_at": result["added_at"],
+        "reserved_at": result["reserved_at"],
+        "reserved_by": result["reserved_by"],
         "trace": trace_data,
     }
 
@@ -197,7 +256,6 @@ async def complete_entry(conn: asyncpg.Connection, queue_id: UUID, entry_id: UUI
     - (False, "queue_not_found") if queue doesn't exist
     - (False, "entry_not_found") if entry doesn't exist or doesn't belong to queue
     """
-    # Verify queue exists
     query, params = prepare_query(
         "SELECT EXISTS(SELECT 1 FROM queues WHERE id = $queue_id)",
         queue_id=queue_id,
@@ -206,10 +264,10 @@ async def complete_entry(conn: asyncpg.Connection, queue_id: UUID, entry_id: UUI
     if not exists:
         return False, "queue_not_found"
 
-    # Delete the entry
     query, params = prepare_query(
         """
-        DELETE FROM queue_entries
+        UPDATE queue_entries
+        SET status = 'completed'
         WHERE id = $entry_id AND queue_id = $queue_id
         """,
         entry_id=entry_id,
@@ -217,7 +275,7 @@ async def complete_entry(conn: asyncpg.Connection, queue_id: UUID, entry_id: UUI
     )
     result = await conn.execute(query, *params)
 
-    if result == "DELETE 0":
+    if result == "UPDATE 0":
         return False, "entry_not_found"
 
     return True, ""
@@ -231,7 +289,6 @@ async def requeue_entry(conn: asyncpg.Connection, queue_id: UUID, entry_id: UUID
     - (False, "queue_not_found") if queue doesn't exist
     - (False, "entry_not_found") if entry doesn't exist or doesn't belong to queue
     """
-    # Verify queue exists
     query, params = prepare_query(
         "SELECT EXISTS(SELECT 1 FROM queues WHERE id = $queue_id)",
         queue_id=queue_id,
@@ -240,7 +297,7 @@ async def requeue_entry(conn: asyncpg.Connection, queue_id: UUID, entry_id: UUID
     if not exists:
         return False, "queue_not_found"
 
-    # Update entry to reset status and timestamp
+    # Bump added_at to push the skipped entry to the back of the FIFO order.
     query, params = prepare_query(
         """
         UPDATE queue_entries

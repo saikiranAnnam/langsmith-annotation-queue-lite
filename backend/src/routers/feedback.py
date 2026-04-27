@@ -32,6 +32,18 @@ async def create_feedback_batch(
     return result
 
 
+@router.get("/{feedback_id}", response_model=schemas.Feedback)
+async def get_feedback(
+    feedback_id: UUID,
+    conn: asyncpg.Connection = Depends(get_connection),
+) -> dict:
+    """Get a specific feedback item by ID."""
+    feedback = await feedback_service.get_feedback(conn, feedback_id)
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return feedback
+
+
 @router.patch("/{feedback_id}", response_model=schemas.Feedback)
 async def update_feedback(
     feedback_id: UUID,

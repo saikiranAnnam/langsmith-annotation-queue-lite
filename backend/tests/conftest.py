@@ -1,6 +1,5 @@
 """Pytest configuration and fixtures for tests."""
 
-import asyncio
 import os
 import subprocess
 from collections.abc import AsyncGenerator
@@ -9,7 +8,7 @@ import asyncpg
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from src.database import get_pool
+from src.database import get_connection
 from src.main import app
 
 # Test database configuration
@@ -19,13 +18,9 @@ TEST_DB_PASSWORD = os.getenv("TEST_DB_PASSWORD", "postgres")
 TEST_DB_HOST = os.getenv("TEST_DB_HOST", "localhost")
 TEST_DB_PORT = os.getenv("TEST_DB_PORT", "5432")
 
-# Global connection pool
-_pool = None
-
 
 def pytest_configure(config):
     """Create test database and run migrations before any tests."""
-    # Drop and create test database
     subprocess.run(
         [
             "psql",
@@ -52,7 +47,6 @@ def pytest_configure(config):
 
     print(f"\n✓ Created test database: {TEST_DB_NAME}")
 
-    # Run migrations
     test_db_url = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}"
     result = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
@@ -69,12 +63,6 @@ def pytest_configure(config):
 
 def pytest_unconfigure(config):
     """Drop test database after all tests."""
-    global _pool
-    if _pool:
-        loop = asyncio.get_event_loop()
-        if not loop.is_closed():
-            loop.run_until_complete(_pool.close())
-
     subprocess.run(
         [
             "psql",
@@ -87,46 +75,43 @@ def pytest_unconfigure(config):
     print(f"\n✓ Dropped test database: {TEST_DB_NAME}")
 
 
-async def get_test_pool():
-    """Get or create the test database pool."""
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(
-            host=TEST_DB_HOST,
-            port=TEST_DB_PORT,
-            user=TEST_DB_USER,
-            password=TEST_DB_PASSWORD,
-            database=TEST_DB_NAME,
-            min_size=2,
-            max_size=10,
-        )
-    return _pool
-
-
 @pytest_asyncio.fixture
 async def db_conn() -> AsyncGenerator[asyncpg.Connection, None]:
     """Get a database connection for a test with transaction rollback."""
-    pool = await get_test_pool()
-    async with pool.acquire() as conn:
-        # Start a transaction
-        async with conn.transaction():
-            yield conn
-            # Transaction is automatically rolled back
+    pool = await asyncpg.create_pool(
+        host=TEST_DB_HOST,
+        port=TEST_DB_PORT,
+        user=TEST_DB_USER,
+        password=TEST_DB_PASSWORD,
+        database=TEST_DB_NAME,
+        min_size=1,
+        max_size=5,
+    )
+    try:
+        async with pool.acquire() as conn:
+            tr = conn.transaction()
+            await tr.start()
+            try:
+                yield conn
+            finally:
+                await tr.rollback()
+    finally:
+        await pool.close()
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Create a test client with database dependency override."""
-    pool = await get_test_pool()
+async def client(db_conn) -> AsyncGenerator[AsyncClient, None]:
+    """Create a test client that shares the test transaction via db_conn."""
 
-    # Override the database connection dependency
-    app.dependency_overrides[get_pool] = lambda: pool
+    async def override_get_connection():
+        yield db_conn
+
+    app.dependency_overrides[get_connection] = override_get_connection
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
-    # Clear overrides
     app.dependency_overrides.clear()
 
 

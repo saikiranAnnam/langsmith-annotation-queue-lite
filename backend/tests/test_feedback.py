@@ -181,3 +181,87 @@ async def test_feedback_cascade_delete_with_trace(client: AsyncClient, sample_tr
     # Verify feedback is also deleted
     response = await client.get(f"/feedback/{sample_feedback['id']}")
     assert response.status_code == 404
+
+
+async def test_create_feedback_batch_with_span(client: AsyncClient, sample_trace):
+    """Span fields survive a create → GET round-trip (serialization + deserialization of span_path JSONB)."""
+    span_path = ["outputs", "answer"]
+    response = await client.post(
+        "/feedback/batch",
+        json=[
+            {
+                "trace_id": str(sample_trace["id"]),
+                "key": "accuracy",
+                "score": 0.8,
+                "comment": "See highlighted text",
+                "span_path": span_path,
+                "span_start_index": 2,
+                "span_end_index": 7,
+            }
+        ],
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert len(data) == 1
+    fb = data[0]
+    assert fb["span_path"] == span_path
+    assert fb["span_start_index"] == 2
+    assert fb["span_end_index"] == 7
+
+    # Verify span fields come back correctly on a direct GET (tests _parse_row deserialization)
+    get_response = await client.get(f"/feedback/{fb['id']}")
+    assert get_response.status_code == 200
+    fetched = get_response.json()
+    assert fetched["span_path"] == span_path
+    assert fetched["span_start_index"] == 2
+    assert fetched["span_end_index"] == 7
+
+
+async def test_create_feedback_batch_upsert_conflict(client: AsyncClient, sample_trace):
+    """Submitting feedback for the same (trace_id, key) twice upserts — one row, updated values."""
+    payload = [{"trace_id": str(sample_trace["id"]), "key": "accuracy", "score": 0.5, "comment": "first"}]
+
+    first = await client.post("/feedback/batch", json=payload)
+    assert first.status_code == 201
+    first_id = first.json()[0]["id"]
+
+    # Second submit: same trace_id + key, different score and comment
+    payload[0]["score"] = 0.9
+    payload[0]["comment"] = "second"
+    second = await client.post("/feedback/batch", json=payload)
+    assert second.status_code == 201
+    second_data = second.json()
+
+    # Must be the same row (same id), not a new one
+    assert second_data[0]["id"] == first_id
+    assert second_data[0]["score"] == 0.9
+    assert second_data[0]["comment"] == "second"
+
+    # Verify only one row exists for this trace + key
+    all_feedback = await client.get(f"/traces/{sample_trace['id']}/feedback")
+    assert all_feedback.status_code == 200
+    accuracy_rows = [f for f in all_feedback.json() if f["key"] == "accuracy"]
+    assert len(accuracy_rows) == 1
+
+
+async def test_update_feedback_span_fields(client: AsyncClient, sample_feedback):
+    """Span fields can be added via PATCH and persist correctly."""
+    span_path = ["inputs", "question"]
+    response = await client.patch(
+        f"/feedback/{sample_feedback['id']}",
+        json={
+            "span_path": span_path,
+            "span_start_index": 0,
+            "span_end_index": 4,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["span_path"] == span_path
+    assert data["span_start_index"] == 0
+    assert data["span_end_index"] == 4
+    # Original fields untouched
+    assert data["score"] == sample_feedback["score"]
+    assert data["comment"] == sample_feedback["comment"]
